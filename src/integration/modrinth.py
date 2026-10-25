@@ -2,6 +2,7 @@ import json
 import hashlib
 import time
 import threading
+import re as _re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -15,6 +16,8 @@ HEADERS = {"User-Agent": UA, "Accept": "application/json"}
 
 _session = None
 _session_lock = threading.Lock()
+
+_FILENAME_CACHE = {}
 
 
 def _s():
@@ -57,28 +60,79 @@ def search(query, kind, mc_version=None, loader=None, limit=30):
             for h in r.json().get("hits", [])]
 
 
-def pick_file(project_id, mc_version, kind, loader=None):
+def list_versions(project_id):
     r = _get(f"{MODRINTH_API}/project/{project_id}/version")
     if r is None or r.status_code != 200:
-        return None
-    versions = r.json()
-    candidates = []
-    for x in versions:
-        if mc_version and mc_version not in x.get("game_versions", []):
-            continue
-        if kind == "mod" and loader and loader != "vanilla":
-            if loader not in (x.get("loaders") or []):
-                continue
-        candidates.append(x)
-    chosen = (candidates[0] if candidates
-              else (versions[0] if versions else None))
-    if not chosen:
-        return None
-    files = chosen.get("files", [])
+        return []
+    try:
+        data = r.json()
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _loader_matches(want, x):
+    """Strict: True only if version x supports loader `want`.
+    No Forge <-> NeoForge swap. Vanilla matches only files with no
+    loaders tags or a `vanilla` tag."""
+    want = (want or "vanilla").lower()
+    xl = [str(l).lower() for l in (x.get("loaders") or [])]
+    if want == "vanilla":
+        return not xl or "vanilla" in xl
+    return want in xl
+
+
+def _version_compatible(x, mc_version, kind, loader):
+    if mc_version and mc_version not in x.get("game_versions", []):
+        return False
+    if kind == "mod":
+        if not _loader_matches(loader, x):
+            return False
+    return True
+
+
+def _primary_file(x):
+    files = x.get("files", [])
     if not files:
         return None
-    prim = next((f for f in files if f.get("primary")), files[0])
+    return next((f for f in files if f.get("primary")), files[0])
+
+
+def pick_file(project_id, mc_version, kind, loader=None, version_id=None):
+    versions = list_versions(project_id)
+    if not versions:
+        return None
+    if version_id:
+        for x in versions:
+            if x.get("id") == version_id:
+                prim = _primary_file(x)
+                if prim is None:
+                    return None
+                return prim["url"], prim["filename"]
+        return None
+    candidates = [x for x in versions
+                  if _version_compatible(x, mc_version, kind, loader)]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda v: v.get("published", ""), reverse=True)
+    prim = _primary_file(candidates[0])
+    if prim is None:
+        return None
     return prim["url"], prim["filename"]
+
+
+def latest_file(project_id, mc_version, kind, loader=None):
+    versions = list_versions(project_id)
+    candidates = [x for x in versions
+                  if _version_compatible(x, mc_version, kind, loader)]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda v: v.get("published", ""), reverse=True)
+    prim = _primary_file(candidates[0])
+    if prim is None:
+        return None
+    return (prim["url"], prim["filename"],
+            candidates[0].get("version_number", ""))
 
 
 def search_modpacks(query, limit=20):
@@ -116,6 +170,75 @@ def project_from_hash(sha1):
     }
 
 
+_STRIP_PATTERNS = [
+    r"-(?:fabric|forge|neoforge|quilt|mc|server|client)?[-_]?"
+    r"(?:\d+\.\d+(?:\.\d+)?(?:\.\d+)?)(?:[-+].*)?$",
+    r"-(?:fabric|forge|neoforge|quilt|mc|server|client)$",
+    r"[-_]v?\d+(?:\.\d+){1,3}.*$",
+]
+
+
+def _slug_candidates(filename):
+    stem = filename
+    for ext in (".jar", ".zip"):
+        if stem.lower().endswith(ext):
+            stem = stem[: -len(ext)]
+            break
+    out = []
+    seen = set()
+
+    def _add(s):
+        s = s.strip(" -_.")
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            out.append(s)
+
+    _add(stem)
+    for pat in _STRIP_PATTERNS:
+        _add(_re.sub(pat, "", stem, flags=_re.I))
+    if "-" in stem:
+        _add(stem.split("-", 1)[0])
+    return out
+
+
+def project_id_from_filename(filename, kind_hint=None):
+    """Best-effort lookup of a Modrinth project by jar filename.
+    Returns a project id or None. Cached by filename."""
+    if not filename:
+        return None
+    cache_key = filename.lower()
+    cached = _FILENAME_CACHE.get(cache_key)
+    if cached is not None:
+        return cached or None
+
+    for slug in _slug_candidates(filename):
+        r = _get(f"{MODRINTH_API}/search",
+                 params={"query": slug, "limit": 5})
+        if r is None or r.status_code != 200:
+            continue
+        try:
+            hits = r.json().get("hits", [])
+        except Exception:
+            continue
+        target = slug.replace("-", " ").replace("_", " ").lower()
+        for h in hits:
+            title = (h.get("title") or "").lower()
+            pid = h.get("project_id") or h.get("id")
+            if not pid:
+                continue
+            slug_ok = (
+                target == title
+                or target in title
+                or title in target
+                or (h.get("slug") or "").lower() == target.replace(" ", "-")
+            )
+            if slug_ok:
+                _FILENAME_CACHE[cache_key] = pid
+                return pid
+    _FILENAME_CACHE[cache_key] = ""
+    return None
+
+
 def fetch_project(project_id):
     r = _get(f"{MODRINTH_API}/project/{project_id}")
     if r is None or r.status_code != 200:
@@ -148,32 +271,6 @@ def fetch_project(project_id):
     }
 
 
-def latest_file(project_id, mc_version, kind, loader=None):
-    r = _get(f"{MODRINTH_API}/project/{project_id}/version")
-    if r is None or r.status_code != 200:
-        return None
-    versions = r.json()
-    candidates = []
-    for x in versions:
-        if mc_version and mc_version not in x.get("game_versions", []):
-            continue
-        if kind == "mod" and loader and loader != "vanilla":
-            if loader not in (x.get("loaders") or []):
-                continue
-        candidates.append(x)
-    if not candidates:
-        return None
-    candidates.sort(key=lambda v: v.get("published", ""), reverse=True)
-    chosen = candidates[0]
-    files = chosen.get("files", [])
-    if not files:
-        return None
-    prim = next((f for f in files if f.get("primary")), files[0])
-    return prim["url"], prim["filename"], chosen.get("version_number", "")
-
-
-# ---- Batch resolver used by the modpack installer ------------------------
-
 def _sha1_file(path, chunk=1 << 20):
     h = hashlib.sha1()
     with open(path, "rb") as f:
@@ -186,8 +283,6 @@ def _sha1_file(path, chunk=1 << 20):
 
 
 def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
-    """Resolve one jar against Modrinth. Returns a dict with whatever
-    information we managed to gather."""
     p = Path(path)
     out = {
         "project_id": None,
@@ -206,8 +301,13 @@ def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
         return out
     info = project_from_hash(sha1)
     if not info or not info.get("project_id"):
-        out["status"] = "not-on-modrinth"
-        return out
+        pid = project_id_from_filename(p.name)
+        if pid:
+            info = {"project_id": pid, "version_number": "",
+                    "name": p.stem}
+        else:
+            out["status"] = "not-on-modrinth"
+            return out
     out["project_id"] = info["project_id"]
     out["version_number"] = info.get("version_number", "")
     if info.get("name"):
@@ -240,9 +340,6 @@ def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
 
 def resolve_mods_parallel(paths, mc_version, kind, loader=None,
                           workers=3, progress=None):
-    """Resolve a batch of jars with bounded parallelism. Returns
-    {filename: resolved_dict}. progress(done, total) is called as
-    results arrive."""
     results = {}
     total = len(paths)
     if not total:

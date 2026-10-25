@@ -3,32 +3,43 @@ import json
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTabWidget
 
 from core import theme
+from core import translate
 from integration import modrinth
 from browse.base import BrowseBase
 from browse.control import ControlTab
 
 
 class ModsSearchTab(BrowseBase):
-    KIND = "mod"
-    TITLE = "Mods"
-    FOLDER = "mods"
-    SEARCH_PH = "Search mods..."
-    HEADER_ICON = "system-software-install"
-    VANILLA_WARN = "This profile is vanilla — mods will not load."
+    def window_title(self):
+        return translate.t("title.mods")
+
+    def search_placeholder(self):
+        return translate.t("search.mods")
+
+    def header_icon(self):
+        return "system-software-install"
+
+    def vanilla_warning(self):
+        return translate.t("warn.vanilla_mods")
+
+    def folder_name(self):
+        return "mods"
 
     def _search_url(self, query):
         facets = [["project_type:mod"]]
         loader = (self.profile.loader or "vanilla").lower()
         if loader and loader != "vanilla":
             facets.append([f"categories:{loader}"])
+        if self.profile.version:
+            facets.append([f"versions:{self.profile.version}"])
         return ("https://api.modrinth.com/v2/search",
                 {"query": query, "limit": 30,
                  "facets": json.dumps(facets)})
 
     def pick_download(self, hit):
         loader = (self.profile.loader or "vanilla").lower()
-        return modrinth.pick_file(hit["id"], self.profile.version,
-                                  "mod", loader)
+        return modrinth.pick_file(
+            hit["id"], self.profile.version, "mod", loader)
 
 
 class ModsDialog(QDialog):
@@ -36,10 +47,12 @@ class ModsDialog(QDialog):
         super().__init__(parent)
         self.profile = profile
         self.log_fn = log_fn
-        self.setWindowTitle(f"Mods — {profile.name}")
+        self.setWindowTitle(
+            f"{translate.t('title.mods')} — {profile.name}")
         self.resize(1080, 700)
         self.setMinimumSize(760, 500)
-        self.setStyleSheet(f"QDialog{{background:{theme.BG};border:none}}")
+        self.setStyleSheet(
+            f"QDialog{{background:{theme.BG};border:none}}")
 
         v = QVBoxLayout(self)
         v.setContentsMargins(10, 10, 10, 10)
@@ -56,15 +69,12 @@ class ModsDialog(QDialog):
         v.addWidget(self.tabs, 1)
 
         self.search_tab = ModsSearchTab(self, profile, log_fn)
-        self.tabs.addTab(self.search_tab, "Search")
+        self.tabs.addTab(self.search_tab, translate.t("tab.search"))
 
         self.control_tab = ControlTab(self, profile, log_fn, "mod")
-        self.tabs.addTab(self.control_tab, "Control")
+        self.tabs.addTab(self.control_tab, translate.t("tab.control"))
 
-        # <-- THE WIRE: whenever Search installs a file, rescan Control.
         self.search_tab.install_finished.connect(self._on_install_finished)
-        # Also refresh Control every time the user switches to it, in case
-        # files were added outside this dialog while it was open.
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _on_install_finished(self, path):
@@ -72,7 +82,7 @@ class ModsDialog(QDialog):
             self.control_tab.refresh_from_disk()
         except Exception as e:
             try:
-                self.log_fn("error", f"control refresh failed: {e}")
+                self.log_fn("error", str(e))
             except Exception:
                 pass
 

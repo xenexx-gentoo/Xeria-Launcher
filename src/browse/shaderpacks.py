@@ -3,27 +3,36 @@ import json
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTabWidget
 
 from core import theme
+from core import translate
 from integration import modrinth
 from browse.base import BrowseBase
 from browse.control import ControlTab
 
 
 class ShadersSearchTab(BrowseBase):
-    KIND = "shader"
-    TITLE = "Shaders"
-    FOLDER = "shaderpacks"
-    SEARCH_PH = "Search shaders..."
-    HEADER_ICON = "video-display"
-    VANILLA_WARN = None
+    def window_title(self):
+        return translate.t("title.shaders")
+
+    def search_placeholder(self):
+        return translate.t("search.shaders")
+
+    def header_icon(self):
+        return "video-display"
+
+    def folder_name(self):
+        return "shaderpacks"
 
     def _search_url(self, query):
+        facets = [["project_type:shader"]]
+        if self.profile.version:
+            facets.append([f"versions:{self.profile.version}"])
         return ("https://api.modrinth.com/v2/search",
                 {"query": query, "limit": 30,
-                 "facets": json.dumps([["project_type:shader"]])})
+                 "facets": json.dumps(facets)})
 
     def pick_download(self, hit):
-        return modrinth.pick_file(hit["id"], self.profile.version,
-                                  "shader", None)
+        return modrinth.pick_file(
+            hit["id"], self.profile.version, "shader", None)
 
 
 class ShadersDialog(QDialog):
@@ -31,10 +40,12 @@ class ShadersDialog(QDialog):
         super().__init__(parent)
         self.profile = profile
         self.log_fn = log_fn
-        self.setWindowTitle(f"Shaders — {profile.name}")
+        self.setWindowTitle(
+            f"{translate.t('title.shaders')} — {profile.name}")
         self.resize(1080, 700)
         self.setMinimumSize(760, 500)
-        self.setStyleSheet(f"QDialog{{background:{theme.BG};border:none}}")
+        self.setStyleSheet(
+            f"QDialog{{background:{theme.BG};border:none}}")
 
         v = QVBoxLayout(self)
         v.setContentsMargins(10, 10, 10, 10)
@@ -51,12 +62,35 @@ class ShadersDialog(QDialog):
         v.addWidget(self.tabs, 1)
 
         self.search_tab = ShadersSearchTab(self, profile, log_fn)
-        self.tabs.addTab(self.search_tab, "Search")
+        self.tabs.addTab(self.search_tab, translate.t("tab.search"))
 
         self.control_tab = ControlTab(self, profile, log_fn, "shader")
-        self.tabs.addTab(self.control_tab, "Control")
+        self.tabs.addTab(self.control_tab, translate.t("tab.control"))
+
+        self.search_tab.install_finished.connect(self._on_install_finished)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+    def _on_install_finished(self, path):
+        try:
+            self.control_tab.refresh_from_disk()
+        except Exception as e:
+            try:
+                self.log_fn("error", str(e))
+            except Exception:
+                pass
+
+    def _on_tab_changed(self, idx):
+        if idx == 1:
+            try:
+                self.control_tab.refresh_from_disk()
+            except Exception:
+                pass
 
     def closeEvent(self, event):
+        try:
+            self.control_tab.shutdown()
+        except Exception:
+            pass
         try:
             self.search_tab.closeEvent(event)
         except Exception:

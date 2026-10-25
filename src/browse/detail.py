@@ -1,5 +1,5 @@
-import re
 import json
+import re
 
 from PyQt6.QtCore import Qt, QUrl, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QDesktopServices
@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from core import theme
 from core import hardware
+from core import translate
 from browse.common import (
     ICON_SIZE_DETAIL, DETAIL_WIDTH, make_placeholder,
     square_icon, square_icon_pixmap, _crop_alpha_bbox,
@@ -35,7 +36,8 @@ def _md_to_html(md):
     def _linked(m):
         alt, href = m.group(1), m.group(3)
         return f'<a href="{href}">{alt or href}</a>'
-    text = re.sub(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)", _linked, text)
+    text = re.sub(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)",
+                  _linked, text)
 
     text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", "", text)
     text = re.sub(r"<img[^>]*>", "", text, flags=re.I)
@@ -49,8 +51,10 @@ def _md_to_html(md):
 
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-    text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<i>\1</i>", text)
-    text = re.sub(r"(?<!_)_(?!\s)(.+?)(?<!\s)_(?!_)", r"<i>\1</i>", text)
+    text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)",
+                  r"<i>\1</i>", text)
+    text = re.sub(r"(?<!_)_(?!\s)(.+?)(?<!\s)_(?!_)",
+                  r"<i>\1</i>", text)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
 
     text = re.sub(r"^#{1,6}\s*(.+)$", r"<b>\1</b>", text, flags=re.M)
@@ -88,7 +92,6 @@ class DetailPanel(QFrame):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ---- Header (icon + title + meta) ----
         header = QFrame()
         header.setStyleSheet(
             f"QFrame{{background:{theme.BG2};border:none;"
@@ -139,7 +142,6 @@ class DetailPanel(QFrame):
         hh.addWidget(text_host, 1)
         outer.addWidget(header)
 
-        # ---- Description body ----
         self.desc_view = QTextBrowser()
         self.desc_view.setOpenExternalLinks(False)
         self.desc_view.setOpenLinks(False)
@@ -154,16 +156,11 @@ class DetailPanel(QFrame):
         self.desc_view.setStyleSheet(
             f"QTextBrowser{{background:{theme.BG2};color:{theme.FG};"
             f"border:none;padding:14px;"
-            f"font-family:'{theme.UI_FONT}';font-size:10pt}}"
-            f"QScrollBar:vertical{{background:{theme.BG2};width:8px;margin:0}}"
-            f"QScrollBar::handle{{background:{theme.BG3};min-height:20px}}"
-            f"QScrollBar::add-line,QScrollBar::sub-line{{height:0}}"
-            f"QScrollBar::add-page,QScrollBar::sub-page{{background:transparent}}")
+            f"font-family:'{theme.UI_FONT}';font-size:10pt}}")
         self.desc_view.document().setDefaultStyleSheet(
             f"a {{ color: {theme.ACCENT}; text-decoration: underline; }}")
         outer.addWidget(self.desc_view, 1)
 
-        # ---- Screenshots strip (recoloured) ----
         self.shots_frame = QFrame()
         self.shots_frame.setStyleSheet(
             f"QFrame{{background:{theme.BG3};border:none;"
@@ -175,7 +172,7 @@ class DetailPanel(QFrame):
         sf.setContentsMargins(0, 0, 0, 0)
         sf.setSpacing(0)
 
-        shots_header = QLabel("  Screenshots")
+        shots_header = QLabel("  " + translate.t("header.screenshots"))
         shots_header.setFixedHeight(22)
         shots_header.setStyleSheet(
             f"color:{theme.ACCENT};"
@@ -192,14 +189,7 @@ class DetailPanel(QFrame):
         self.shots_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.shots_scroll.setStyleSheet(
-            f"QScrollArea{{background:{theme.BG3};border:none}}"
-            f"QScrollBar:horizontal{{background:{theme.BG2};height:8px;"
-            f"margin:0}}"
-            f"QScrollBar::handle{{background:{theme.BORDER};"
-            f"min-width:20px}}"
-            f"QScrollBar::handle:hover{{background:{theme.FG}}}"
-            f"QScrollBar::add-line,QScrollBar::sub-line{{width:0;height:0}}"
-            f"QScrollBar::add-page,QScrollBar::sub-page{{background:transparent}}")
+            f"QScrollArea{{background:{theme.BG3};border:none}}")
 
         self.shots_host = QWidget()
         self.shots_host.setStyleSheet(
@@ -216,8 +206,6 @@ class DetailPanel(QFrame):
         self.setMinimumWidth(0)
         self.setMaximumWidth(0)
         self.setVisible(False)
-
-    # ---- Actions ---------------------------------------------------------
 
     def _open_link(self, url):
         QDesktopServices.openUrl(url)
@@ -254,16 +242,11 @@ class DetailPanel(QFrame):
         self._anim = a
         a.start()
 
-    # ---- Content ---------------------------------------------------------
-
     def show_project(self, hit):
         self.pid = hit.get("id") or hit.get("project_id")
         self.title_lbl.setText(hit["title"])
-        loaders = [c for c in hit.get("categories", [])
-                   if c in ("fabric", "forge", "neoforge", "quilt")]
-        tag = f"  [{','.join(loaders)}]" if loaders else ""
         self.meta_lbl.setText(
-            f"by {hit['author']}{tag}  ·  {hit['dl']:,} downloads")
+            translate.t("browse.meta", author=hit["author"]))
 
         while self.shots_row.count() > 1:
             item = self.shots_row.takeAt(0)
@@ -272,12 +255,14 @@ class DetailPanel(QFrame):
                 w.deleteLater()
         self.shots_frame.setVisible(False)
 
-        cached = _BODY_CACHE.get(self.pid) if HW.enable_body_cache else None
+        cached = (_BODY_CACHE.get(self.pid)
+                  if HW.enable_body_cache else None)
         if cached is not None:
             self._body_html = cached
         else:
             self._body_html = (
-                f'<span style="color:{theme.GRAY}">Loading description…</span>')
+                f'<span style="color:{theme.GRAY}">'
+                f'{translate.t("browse.loading_desc")}</span>')
 
         self._set_icon_pixmap(
             make_placeholder(ICON_SIZE_DETAIL).pixmap(
@@ -316,7 +301,8 @@ class DetailPanel(QFrame):
             if status != 200:
                 return
             try:
-                body = json.loads(bytes(data).decode("utf-8")).get("body") or ""
+                body = json.loads(
+                    bytes(data).decode("utf-8")).get("body") or ""
             except Exception:
                 return
             html = _md_to_html(body)

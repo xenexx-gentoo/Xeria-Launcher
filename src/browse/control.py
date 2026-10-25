@@ -4,7 +4,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt6.QtCore import Qt, QSize, QUrl, QTimer
-from PyQt6.QtGui import QDesktopServices, QAction
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtNetwork import QNetworkAccessManager
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core import theme
+from core import translate
 from core.paths import IS_WIN, IS_MAC
 from core.worker import Worker, _leaked_threads
 from integration import modrinth, net as http
@@ -27,20 +28,24 @@ KIND_FOLDER = {
     "resourcepack": "resourcepacks",
     "shader":       "shaderpacks",
 }
-KIND_LABEL = {
-    "mod":          "mod",
-    "resourcepack": "resource pack",
-    "shader":       "shader pack",
-}
+
 KIND_PROJECT_TYPE = {
     "mod":          "mod",
     "resourcepack": "resourcepack",
     "shader":       "shader",
 }
 
-
 DOWNLOAD_WORKERS = 12
 LOOKUP_WORKERS = 3
+
+
+def _verify_installed(path, mc_version, kind, loader):
+    from instances.migrate import verify_one
+    return verify_one(path, mc_version, kind, loader)
+
+
+def _kind_label(kind):
+    return translate.t(f"kind.{kind}")
 
 
 class ControlTab(QWidget):
@@ -52,7 +57,7 @@ class ControlTab(QWidget):
         self.log_fn = log_fn
         self.kind = kind
         self.folder = KIND_FOLDER[kind]
-        self.label = KIND_LABEL[kind]
+        self.label = _kind_label(kind)
 
         self._mods = {}
         self._sync_running = False
@@ -74,8 +79,6 @@ class ControlTab(QWidget):
         self._summary_lbl = self.summary
         self.rescan()
 
-    # ---- Events ---------------------------------------------------------
-
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(0, self._cull_visible)
@@ -89,8 +92,6 @@ class ControlTab(QWidget):
             self._ensure_resolved()
         except RuntimeError:
             pass
-
-    # ---- Background resolve ---------------------------------------------
 
     def _ensure_resolved(self):
         try:
@@ -152,14 +153,22 @@ class ControlTab(QWidget):
                     r = result.get(entry["filename"])
                     if not r:
                         continue
-                    entry["project_id"] = r.get("project_id") or entry["project_id"]
-                    entry["title"] = r.get("title") or entry["title"]
-                    entry["author"] = r.get("author") or entry["author"]
-                    entry["current_ver"] = r.get("version_number") or entry["current_ver"]
-                    entry["latest_ver"] = r.get("latest_version") or entry["latest_ver"]
-                    entry["url"] = r.get("latest_url") or entry["url"]
-                    entry["target_name"] = r.get("latest_filename") or entry["target_name"]
-                    entry["status"] = r.get("status") or entry["status"]
+                    entry["project_id"] = (
+                        r.get("project_id") or entry["project_id"])
+                    entry["title"] = (
+                        r.get("title") or entry["title"])
+                    entry["author"] = (
+                        r.get("author") or entry["author"])
+                    entry["current_ver"] = (
+                        r.get("version_number") or entry["current_ver"])
+                    entry["latest_ver"] = (
+                        r.get("latest_version") or entry["latest_ver"])
+                    entry["url"] = (
+                        r.get("latest_url") or entry["url"])
+                    entry["target_name"] = (
+                        r.get("latest_filename") or entry["target_name"])
+                    entry["status"] = (
+                        r.get("status") or entry["status"])
                     pid = entry.get("project_id")
                     if pid and entry.get("icon_pixmap") is None:
                         try:
@@ -172,8 +181,6 @@ class ControlTab(QWidget):
         except RuntimeError:
             pass
 
-    # ---- UI --------------------------------------------------------------
-
     def _build_ui(self):
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -182,14 +189,14 @@ class ControlTab(QWidget):
         top = QHBoxLayout()
         top.setSpacing(6)
 
-        self.summary = QLabel("Scanning…")
+        self.summary = QLabel("…")
         self.summary.setStyleSheet(
             f"color:{theme.GRAY};font-size:9pt;background:transparent")
         self.summary.setSizePolicy(QSizePolicy.Policy.Expanding,
                                    QSizePolicy.Policy.Preferred)
         top.addWidget(self.summary, 1)
 
-        self.sync_all_btn = QPushButton("Synchronize all")
+        self.sync_all_btn = QPushButton(translate.t("btn.sync_all"))
         self.sync_all_btn.setMinimumWidth(160)
         self.sync_all_btn.setSizePolicy(QSizePolicy.Policy.Preferred,
                                         QSizePolicy.Policy.Fixed)
@@ -209,7 +216,8 @@ class ControlTab(QWidget):
 
         self.list = QListWidget()
         self.list.setFrameShape(QFrame.Shape.NoFrame)
-        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list.setSelectionMode(
+            QListWidget.SelectionMode.ExtendedSelection)
         self.list.setVerticalScrollMode(
             QListWidget.ScrollMode.ScrollPerPixel)
         self.list.setIconSize(QSize(ICON_SIZE_ROW, ICON_SIZE_ROW))
@@ -221,13 +229,9 @@ class ControlTab(QWidget):
             f"border:none;padding:0;outline:0}}"
             f"QListWidget::item{{padding:0;border:none}}"
             f"QListWidget::item:selected{{background:{theme.BG3};"
-            f"border:none}}"
-            f"QScrollBar:vertical{{background:{theme.BG2};width:8px;"
-            f"margin:0}}"
-            f"QScrollBar::handle{{background:{theme.BG3};min-height:20px}}"
-            f"QScrollBar::add-line,QScrollBar::sub-line{{height:0}}"
-            f"QScrollBar::add-page,QScrollBar::sub-page{{background:transparent}}")
-        self.list.verticalScrollBar().valueChanged.connect(self._cull_visible)
+            f"border:none}}")
+        self.list.verticalScrollBar().valueChanged.connect(
+            self._cull_visible)
         v.addWidget(self.list, 1)
 
     def restyle(self):
@@ -235,7 +239,8 @@ class ControlTab(QWidget):
             if self._deleted:
                 return
             self.summary.setStyleSheet(
-                f"color:{theme.GRAY};font-size:9pt;background:transparent")
+                f"color:{theme.GRAY};font-size:9pt;"
+                f"background:transparent")
             self.sync_all_btn.setStyleSheet(
                 f"QPushButton{{background:{theme.ACCENT};"
                 f"color:{theme.on_accent()};border:none;"
@@ -247,14 +252,13 @@ class ControlTab(QWidget):
         except RuntimeError:
             pass
 
-    # ---- Worker tracking -------------------------------------------------
-
     def _track(self, w, on_done=None):
         try:
             self._active_workers.add(w)
             if on_done is not None:
                 w.done.connect(on_done, Qt.ConnectionType.QueuedConnection)
-            w.finished.connect(lambda: self._active_workers.discard(w))
+            w.finished.connect(
+                lambda: self._active_workers.discard(w))
         except RuntimeError:
             pass
 
@@ -298,8 +302,6 @@ class ControlTab(QWidget):
         except Exception:
             pass
         super().closeEvent(event)
-
-    # ---- Local scan ------------------------------------------------------
 
     def rescan(self):
         try:
@@ -348,8 +350,6 @@ class ControlTab(QWidget):
         except RuntimeError:
             pass
 
-    # ---- Sync ------------------------------------------------------------
-
     def synchronize_all(self):
         try:
             if self._deleted:
@@ -358,16 +358,16 @@ class ControlTab(QWidget):
                        if not m["busy"]]
             if not entries:
                 QMessageBox.information(
-                    self, "Nothing to do",
-                    f"No {self.label}s found.")
+                    self, translate.t("control.nothing"),
+                    translate.t("control.no_items", label=self.label))
                 return
             if QMessageBox.question(
-                    self, f"Synchronize {self.label}s",
-                    f"Check {len(entries)} {self.label}(s) against Modrinth "
-                    f"and download the latest compatible versions for "
-                    f"Minecraft {self.profile.version}?\n\n"
-                    f"Files with no update will be left untouched. "
-                    f"Outdated files will be replaced."
+                self,
+                translate.t("control.confirm_sync_title",
+                            label=self.label),
+                translate.t("control.confirm_sync",
+                            n=len(entries), label=self.label,
+                            version=self.profile.version),
             ) != QMessageBox.StandardButton.Yes:
                 return
 
@@ -380,7 +380,8 @@ class ControlTab(QWidget):
             self._update_summary()
 
             w = Worker(self._sync_all_task, entries)
-            w.log.connect(self.log_fn, Qt.ConnectionType.QueuedConnection)
+            w.log.connect(self.log_fn,
+                          Qt.ConnectionType.QueuedConnection)
             w.progress.connect(
                 lambda *a: self._on_sync_progress(*a),
                 Qt.ConnectionType.QueuedConnection)
@@ -395,10 +396,7 @@ class ControlTab(QWidget):
         try:
             if self._deleted:
                 return
-            msg = f"{label} {cur}/{total}"
-            if extra:
-                msg += f"  ·  {extra}"
-            self.summary.setText(msg)
+            self.summary.setText(f"{label} {cur}/{total}")
         except RuntimeError:
             pass
 
@@ -408,8 +406,38 @@ class ControlTab(QWidget):
         mc_version = self.profile.version
         kind = self.kind
 
+        cleanup_total = len(entries)
+        if cleanup_total:
+            progress("cleanup", 0, cleanup_total, "", "")
+        removed_paths = []
+        for i, (path, entry) in enumerate(entries, 1):
+            p = Path(path)
+            if not p.exists():
+                continue
+            if not _verify_installed(p, mc_version, kind, loader):
+                try:
+                    p.unlink()
+                    removed_paths.append(path)
+                    log("warn", translate.t(
+                        "console.removed_incompat",
+                        name=entry["filename"], version=mc_version))
+                except Exception as e:
+                    log("error", translate.t(
+                        "console.remove_failed",
+                        name=entry["filename"], err=e))
+            progress("cleanup", i, cleanup_total, entry["filename"], "")
+        progress_end()
+
+        for path in removed_paths:
+            entry = self._mods.get(path)
+            if entry is not None:
+                entry["status"] = "removed"
+                entry["busy"] = False
+
+        remaining = [(p, e) for p, e in entries if Path(p).exists()]
+
         need_resolve = []
-        for path, entry in entries:
+        for path, entry in remaining:
             if not entry.get("url") or not entry.get("project_id"):
                 need_resolve.append((path, entry))
 
@@ -427,24 +455,35 @@ class ControlTab(QWidget):
                     if not r:
                         entry["status"] = "error"
                         continue
-                    entry["project_id"] = r.get("project_id") or entry["project_id"]
-                    entry["title"] = r.get("title") or entry["title"]
-                    entry["author"] = r.get("author") or entry["author"]
-                    entry["current_ver"] = r.get("version_number") or entry["current_ver"]
-                    entry["latest_ver"] = r.get("latest_version") or entry["latest_ver"]
-                    entry["url"] = r.get("latest_url") or entry["url"]
-                    entry["target_name"] = r.get("latest_filename") or entry["target_name"]
-                    entry["status"] = r.get("status") or entry["status"]
+                    entry["project_id"] = (
+                        r.get("project_id") or entry["project_id"])
+                    entry["title"] = (
+                        r.get("title") or entry["title"])
+                    entry["author"] = (
+                        r.get("author") or entry["author"])
+                    entry["current_ver"] = (
+                        r.get("version_number") or entry["current_ver"])
+                    entry["latest_ver"] = (
+                        r.get("latest_version") or entry["latest_ver"])
+                    entry["url"] = (
+                        r.get("latest_url") or entry["url"])
+                    entry["target_name"] = (
+                        r.get("latest_filename") or entry["target_name"])
+                    entry["status"] = (
+                        r.get("status") or entry["status"])
             except Exception as e:
-                log("error", f"resolve failed: {e}")
+                log("error", str(e))
             progress_end()
 
         to_download = []
-        for path, entry in entries:
+        for path, entry in remaining:
             if not entry.get("url") or not entry.get("target_name"):
                 entry["busy"] = False
+                if entry.get("status") == "update-available":
+                    entry["status"] = "no-update-available"
                 continue
-            if entry["current_ver"] == entry["latest_ver"] and entry["current_ver"]:
+            if (entry["current_ver"] == entry["latest_ver"]
+                    and entry["current_ver"]):
                 entry["status"] = "up-to-date"
                 entry["busy"] = False
                 continue
@@ -464,20 +503,30 @@ class ControlTab(QWidget):
             old = Path(path)
             target = mods_dir / entry["target_name"]
             tmp = target.with_suffix(target.suffix + ".part")
-            log("info",
-                f"{entry['title']} → {entry['target_name']} "
-                f"({entry['latest_ver']})")
+            log("info", translate.t(
+                "console.installing", title=entry["title"]))
             try:
                 with http.stream("GET", entry["url"]) as r:
                     r.raise_for_status()
                     with open(tmp, "wb") as f:
                         for chunk in r.iter_bytes(65536):
                             f.write(chunk)
+                if not _verify_installed(tmp, mc_version, kind, loader):
+                    try:
+                        tmp.unlink()
+                    except Exception:
+                        pass
+                    entry["status"] = "no-update-available"
+                    entry["busy"] = False
+                    log("warn", translate.t(
+                        "console.removed_incompat",
+                        name=entry["target_name"], version=mc_version))
+                    return False, entry
                 if old.exists() and old.resolve() != target.resolve():
                     try:
                         old.unlink()
                     except Exception as e:
-                        log("warn", f"could not remove old file: {e}")
+                        log("warn", str(e))
                 tmp.replace(target)
                 entry["status"] = "up-to-date"
                 entry["current_ver"] = entry["latest_ver"]
@@ -485,7 +534,7 @@ class ControlTab(QWidget):
                 entry["busy"] = False
                 return True, entry
             except Exception as e:
-                log("error", f"failed {entry['title']}: {e}")
+                log("error", str(e))
                 entry["status"] = "error"
                 entry["busy"] = False
                 try:
@@ -502,7 +551,8 @@ class ControlTab(QWidget):
                 if ok:
                     synced += 1
                 done_count += 1
-                progress("syncing", done_count, total, entry["filename"], "")
+                progress("syncing", done_count, total,
+                         entry["filename"], "")
 
         progress_end()
         return synced
@@ -514,7 +564,8 @@ class ControlTab(QWidget):
             self._sync_running = False
             self._rerender()
             if synced is not None:
-                self.log_fn("ok", f"synchronized {synced} {self.label}(s)")
+                self.log_fn("ok", translate.t(
+                    "console.sync_done", n=synced, label=self.label))
             for entry in self._mods.values():
                 pid = entry.get("project_id")
                 if pid and entry.get("icon_pixmap") is None:
@@ -531,6 +582,8 @@ class ControlTab(QWidget):
         try:
             meta = {}
             for entry in self._mods.values():
+                if entry.get("status") == "removed":
+                    continue
                 meta[entry["filename"]] = {
                     "project_id": entry.get("project_id"),
                     "title": entry.get("title", ""),
@@ -545,8 +598,6 @@ class ControlTab(QWidget):
             self.profile.save()
         except Exception:
             pass
-
-    # ---- Single-row sync (context menu, multi-select aware) --------------
 
     def _sync_selected(self):
         try:
@@ -572,7 +623,8 @@ class ControlTab(QWidget):
             self._update_summary()
 
             w = Worker(self._sync_all_task, chosen)
-            w.log.connect(self.log_fn, Qt.ConnectionType.QueuedConnection)
+            w.log.connect(self.log_fn,
+                          Qt.ConnectionType.QueuedConnection)
             w.progress.connect(
                 lambda *a: self._on_sync_progress(*a),
                 Qt.ConnectionType.QueuedConnection)
@@ -582,8 +634,6 @@ class ControlTab(QWidget):
             w.start()
         except RuntimeError:
             pass
-
-    # ---- Delete (multi-select aware) -------------------------------------
 
     def _delete_selected(self):
         try:
@@ -603,26 +653,33 @@ class ControlTab(QWidget):
             if len(targets) == 1:
                 entry = self._mods.get(targets[0])
                 label = entry["title"] if entry else "?"
-                msg = f"Delete '{label}' from this instance?\n\nThis cannot be undone."
+                msg = translate.t("control.confirm_delete_one",
+                                  title=label)
             else:
-                msg = (f"Delete {len(targets)} {self.label}(s) "
-                       f"from this instance?\n\nThis cannot be undone.")
+                msg = translate.t("control.confirm_delete_many",
+                                  n=len(targets), label=self.label)
             if QMessageBox.question(
-                    self, f"Delete {self.label}",
-                    msg) != QMessageBox.StandardButton.Yes:
+                self,
+                translate.t("control.confirm_delete_title",
+                            label=self.label),
+                msg,
+            ) != QMessageBox.StandardButton.Yes:
                 return
             for path in targets:
                 entry = self._mods.get(path)
                 try:
                     Path(path).unlink()
                     if entry:
-                        self.log_fn("warn", f"deleted {entry['title']}")
+                        self.log_fn("warn", translate.t(
+                            "console.deleted", title=entry["title"]))
                 except Exception as e:
-                    self.log_fn("error", f"delete failed: {e}")
+                    self.log_fn("error", translate.t(
+                        "console.delete_failed", err=e))
                     continue
                 try:
                     if entry:
-                        self.profile.mods_meta.pop(entry["filename"], None)
+                        self.profile.mods_meta.pop(
+                            entry["filename"], None)
                 except Exception:
                     pass
                 del self._mods[path]
@@ -635,8 +692,6 @@ class ControlTab(QWidget):
         except RuntimeError:
             pass
 
-    # ---- Context menu ----------------------------------------------------
-
     def _on_ctx(self, pos):
         try:
             if self._deleted:
@@ -644,7 +699,6 @@ class ControlTab(QWidget):
             item = self.list.itemAt(pos)
             if item is None:
                 return
-            # If clicking outside current selection, replace it.
             if not item.isSelected():
                 self.list.clearSelection()
                 item.setSelected(True)
@@ -652,7 +706,6 @@ class ControlTab(QWidget):
 
             paths = self._sorted_paths()
             sel_count = len(self.list.selectedItems())
-            # Show the primary row's title in the header.
             row = self.list.row(item)
             primary_path = paths[row] if 0 <= row < len(paths) else None
             primary = self._mods.get(primary_path) if primary_path else None
@@ -665,42 +718,40 @@ class ControlTab(QWidget):
                 f"QMenu::item:selected{{background:{theme.BG3};"
                 f"color:{theme.FG}}}"
                 f"QMenu::item:disabled{{color:{theme.GRAY}}}"
-                f"QMenu::separator{{height:1px;background:{theme.BORDER};"
-                f"margin:4px 0}}")
-
-            if primary:
-                header_text = (primary["title"] if sel_count == 1
-                               else f"{sel_count} {self.label}s selected")
-                a = m.addAction(header_text)
-                a.setEnabled(False)
-                m.addSeparator()
+                f"QMenu::separator{{height:1px;"
+                f"background:{theme.BORDER};margin:4px 0}}")
 
             busy = self._sync_running
-            sync_act = m.addAction(
-                f"Sync to latest ({sel_count})" if sel_count > 1
-                else "Sync to latest")
+            sync_label = (translate.t("btn.sync_latest")
+                          if sel_count == 1
+                          else f"{translate.t('btn.sync_latest')} "
+                               f"({sel_count})")
+            sync_act = m.addAction(sync_label)
             sync_act.setEnabled(not busy)
-            sync_act.triggered.connect(lambda _=False: self._sync_selected())
+            sync_act.triggered.connect(
+                lambda _=False: self._sync_selected())
 
             if primary and primary.get("project_id"):
                 pid = primary["project_id"]
                 m.addAction(
-                    "Open on Modrinth",
+                    translate.t("control.menu_open_modrinth"),
                     lambda pid=pid: QDesktopServices.openUrl(
                         QUrl(f"https://modrinth.com/"
                              f"{KIND_PROJECT_TYPE[self.kind]}/{pid}")))
 
             m.addSeparator()
             if primary_path:
-                m.addAction("Reveal in file manager",
-                            lambda p=primary_path: self._reveal(p))
+                m.addAction(
+                    translate.t("control.menu_reveal"),
+                    lambda p=primary_path: self._reveal(p))
 
             m.addSeparator()
-            del_act = QAction(
-                f"Delete ({sel_count})" if sel_count > 1 else "Delete", m)
+            del_label = (translate.t("btn.delete") if sel_count == 1
+                         else f"{translate.t('btn.delete')} "
+                              f"({sel_count})")
+            del_act = m.addAction(del_label)
             del_act.triggered.connect(
                 lambda _=False: self._delete_selected())
-            m.addAction(del_act)
 
             m.exec(self.list.mapToGlobal(pos))
         except RuntimeError:
@@ -720,11 +771,10 @@ class ControlTab(QWidget):
                 subprocess.Popen(["xdg-open", str(folder)])
         except Exception as e:
             try:
-                self.log_fn("error", f"reveal failed: {e}")
+                self.log_fn("error", translate.t(
+                    "console.reveal_failed", err=e))
             except Exception:
                 pass
-
-    # ---- Icons -----------------------------------------------------------
 
     def _on_icon_ready(self, project_id, icon):
         try:
@@ -742,8 +792,6 @@ class ControlTab(QWidget):
         except RuntimeError:
             pass
 
-    # ---- Rendering + culling ---------------------------------------------
-
     def _update_summary(self):
         try:
             if self._deleted:
@@ -753,24 +801,12 @@ class ControlTab(QWidget):
                 return
             total = len(self._mods)
             if total == 0:
-                lbl.setText(
-                    f"No {self.label}s installed in this instance.")
+                lbl.setText(translate.t(
+                    "control.summary_empty", label=self.label))
                 return
-            counts = {}
-            for m in self._mods.values():
-                counts[m["status"]] = counts.get(m["status"], 0) + 1
-            parts = [f"{total} {self.label}(s)"]
-            if counts.get("update-available"):
-                parts.append(f"{counts['update-available']} update(s)")
-            if counts.get("up-to-date"):
-                parts.append(f"{counts['up-to-date']} up-to-date")
-            if counts.get("unchecked"):
-                parts.append(f"{counts['unchecked']} unchecked")
-            if counts.get("not-on-modrinth"):
-                parts.append(f"{counts['not-on-modrinth']} not on Modrinth")
-            if counts.get("error"):
-                parts.append(f"{counts['error']} error(s)")
-            lbl.setText("  ·  ".join(parts))
+            lbl.setText(translate.t(
+                "control.summary_count",
+                n=total, label=self.label))
         except RuntimeError:
             pass
 
@@ -905,42 +941,19 @@ class ControlTab(QWidget):
         col.addWidget(title)
 
         ver = entry["current_ver"] or ""
-        if entry["status"] == "update-available" and entry["latest_ver"]:
-            if ver:
-                sub_text = (f"{entry['filename']}  ·  {ver} → "
-                            f"{entry['latest_ver']} available")
-            else:
-                sub_text = (f"{entry['filename']}  ·  "
-                            f"{entry['latest_ver']} available")
-        elif entry["status"] == "up-to-date":
-            if ver:
-                sub_text = f"{entry['filename']}  ·  {ver}  ·  up to date"
-            else:
-                sub_text = f"{entry['filename']}  ·  up to date"
-        elif entry["status"] == "checking":
-            sub_text = f"{entry['filename']}  ·  checking…"
-        elif entry["status"] == "not-on-modrinth":
-            sub_text = f"{entry['filename']}  ·  not on Modrinth"
-        elif entry["status"] == "error":
-            sub_text = f"{entry['filename']}  ·  error while checking"
-        elif entry["status"] == "no-update-available":
-            sub_text = f"{entry['filename']}  ·  no compatible version"
+        fn = entry["filename"] or ""
+        if ver:
+            sub_text = translate.t("control.row_filename_ver",
+                                   filename=fn, ver=ver)
         else:
-            sub_text = f"{entry['filename']}  ·  unchecked"
+            sub_text = translate.t("control.row_filename", filename=fn)
         sub = QLabel(sub_text)
         sub.setStyleSheet(
             f"color:{theme.GRAY};font-size:9pt;background:transparent")
         col.addWidget(sub)
         h.addLayout(col, 1)
 
-        badge_text, badge_color = {
-            "update-available":  ("Update available", theme.YELLOW),
-            "up-to-date":        ("Up to date", theme.GREEN),
-            "checking":          ("Checking…", theme.GRAY),
-            "not-on-modrinth":   ("Not on Modrinth", theme.GRAY),
-            "no-update-available": ("No compatible version", theme.GRAY),
-            "error":             ("Error", theme.RED),
-        }.get(entry["status"], ("Unchecked", theme.GRAY))
+        badge_text, badge_color = self._badge_for_status(entry["status"])
         if badge_text:
             badge = QLabel(badge_text)
             badge.setStyleSheet(
@@ -949,3 +962,20 @@ class ControlTab(QWidget):
             h.addWidget(badge)
 
         return row
+
+    def _badge_for_status(self, status):
+        if status == "update-available":
+            return translate.t("control.badge_update"), theme.ACCENT
+        if status == "up-to-date":
+            return translate.t("control.badge_uptodate"), theme.FG
+        if status == "checking":
+            return translate.t("control.badge_checking"), theme.GRAY
+        if status == "no-update-available":
+            return translate.t("control.badge_no_compat"), theme.GRAY
+        if status == "not-on-modrinth":
+            return translate.t("control.badge_not_modrinth"), theme.GRAY
+        if status == "removed":
+            return translate.t("control.badge_removed"), theme.RED
+        if status == "error":
+            return translate.t("control.badge_error"), theme.RED
+        return translate.t("control.badge_unchecked"), theme.GRAY

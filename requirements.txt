@@ -1,0 +1,8 @@
+PyQt6
+PyQt6-WebEngine
+PyOpenGL
+httpx[http2]
+pillow
+truststore
+certifi
+requests

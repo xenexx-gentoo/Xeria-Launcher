@@ -1,8 +1,4 @@
-import base64
-import hashlib
-import secrets
 import time
-import urllib.parse
 
 import requests
 
@@ -125,7 +121,8 @@ class Account:
             timeout=30,
         )
         if r.status_code == 404:
-            raise AuthError("this Microsoft account does not own Minecraft")
+            raise AuthError(
+                "this Microsoft account does not own Minecraft")
         r.raise_for_status()
         prof = r.json()
         self.name = prof["name"]
@@ -143,18 +140,17 @@ class Account:
 
 
 def sign_in_webview(parent=None, log=print):
-    from PyQt5.QtCore import QUrl, QTimer, Qt
-    from PyQt5.QtGui import QGuiApplication
-    from PyQt5.QtWidgets import (
+    from PyQt6.QtCore import QUrl, QTimer, Qt
+    from PyQt6.QtGui import QGuiApplication
+    from PyQt6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     )
     try:
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
     except Exception:
         raise AuthError(
-            "PyQtWebEngine is not installed. "
-            "sudo pacman -S python-pyqt5-webengine  — or —  "
-            "pip install PyQtWebEngine")
+            "PyQt6-WebEngine is not installed. "
+            "Install it with: pip install PyQt6-WebEngine")
 
     dc = None
     try:
@@ -185,22 +181,25 @@ def sign_in_webview(parent=None, log=print):
     dlg.setWindowTitle("Sign in with Microsoft")
     dlg.resize(560, 780)
     v = QVBoxLayout(dlg)
-    v.setContentsMargins(0, 0, 0, 0); v.setSpacing(0)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(0)
 
     panel = QFrame()
     panel.setStyleSheet("QFrame{background:#1a1a1a}")
     pl = QVBoxLayout(panel)
-    pl.setContentsMargins(14, 12, 14, 12); pl.setSpacing(6)
+    pl.setContentsMargins(14, 12, 14, 12)
+    pl.setSpacing(6)
 
     top = QHBoxLayout()
     lbl = QLabel("Sign-in code:")
-    lbl.setStyleSheet("background:transparent;color:#999;font-size:10pt")
+    lbl.setStyleSheet(
+        "background:transparent;color:#999;font-size:10pt")
     top.addWidget(lbl)
 
     code_lbl = QLabel(user_code)
     code_lbl.setStyleSheet(
         "background:transparent;color:#fff;font-size:10pt")
-    code_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    code_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     top.addWidget(code_lbl)
     top.addStretch()
 
@@ -253,7 +252,7 @@ def sign_in_webview(parent=None, log=print):
     poll_timer.start()
 
     log("info", "opening sign-in window…")
-    accepted = dlg.exec_() == QDialog.Accepted
+    accepted = dlg.exec() == QDialog.DialogCode.Accepted
     poll_timer.stop()
 
     if not accepted:

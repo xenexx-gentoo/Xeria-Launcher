@@ -1,42 +1,38 @@
+from pathlib import Path
+
 from PyQt6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QObject,
 )
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QComboBox,
-    QCheckBox, QGridLayout, QTabWidget, QPlainTextEdit,
+    QPushButton, QComboBox, QGridLayout, QTabWidget, QPlainTextEdit,
     QMessageBox, QInputDialog, QFileDialog, QFrame,
-    QGraphicsOpacityEffect,
+    QGraphicsOpacityEffect, QSizePolicy,
 )
-from pathlib import Path
+
 from core import theme
-from core.worker import Worker
-from ui.helpers import (
-    s_btn, s_btn_accent, s_entry, s_combo, s_textedit, s_spin, s_tabs,
-)
-from core.jvm import default_jvm_flags
+from core import translate
 from core.java import find_javas, best_java
+from core.jvm import default_jvm_flags
 from core.paths import IS_WIN
+from ui.helpers import (
+    s_btn, s_btn_accent, s_entry, s_combo, s_textedit, s_tabs,
+)
 
 
 class _EscCloseFilter(QObject):
-    """Intercepts Esc inside a line edit so it clears the field first,
-    and only closes the dialog if the field was already empty."""
     def __init__(self, dialog, field):
         super().__init__(dialog)
         self._dialog = dialog
         self._field = field
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.KeyPress and \
-           event.key() == Qt.Key.Key_Escape:
-            try:
-                if self._field.text():
-                    self._field.clear()
-                else:
-                    self._dialog.reject()
-            except Exception:
-                pass
+        if event.type() == QEvent.Type.KeyPress \
+                and event.key() == Qt.Key.Key_Escape:
+            if self._field.text():
+                self._field.clear()
+            else:
+                self._dialog.reject()
             return True
         return super().eventFilter(obj, event)
 
@@ -45,7 +41,6 @@ def fade_in(dialog, duration=120):
     effect = QGraphicsOpacityEffect(dialog)
     effect.setOpacity(0.0)
     dialog.setGraphicsEffect(effect)
-
     anim = QPropertyAnimation(effect, b"opacity", dialog)
     anim.setDuration(duration)
     anim.setStartValue(0.0)
@@ -61,51 +56,56 @@ def fade_in(dialog, duration=120):
 
 
 class _ChoiceCard(QFrame):
+    HEIGHT = 46
+
     def __init__(self, title, subtitle, accent, on_click, parent=None):
         super().__init__(parent)
         self._on_click = on_click
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(72)
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Fixed)
+        self.setObjectName("choiceCard")
         self._accent = accent
-        self._base = theme.ACCENT if accent else theme.BG3
-        self._hover = theme.ACCENT2 if accent else theme.BORDER
 
-        fg_title = theme.on_accent() if accent else theme.FG
-        fg_sub = "#000000" if accent else theme.GRAY
-        border = "none" if accent else f"1px solid {theme.BORDER}"
+        if accent:
+            bg = theme.ACCENT
+            fg_title = theme.on_accent()
+            fg_sub = fg_title
+            border = "none"
+            hover = theme.ACCENT2
+        else:
+            bg = theme.BG2
+            fg_title = theme.FG
+            fg_sub = theme.GRAY
+            border = f"1px solid {theme.BORDER}"
+            hover = theme.BG3
 
-        self._normal_css = f"""
-            _ChoiceCard, QFrame {{
-                background: {self._base};
-                border: {border};
-                border-radius: 0;
-            }}
-        """
-        self._hover_css = f"""
-            _ChoiceCard, QFrame {{
-                background: {self._hover};
-                border: {border};
-                border-radius: 0;
-            }}
-        """
+        self._normal_css = (
+            f"QFrame#choiceCard{{background:{bg};border:{border};"
+            f"border-radius:0}}")
+        self._hover_css = (
+            f"QFrame#choiceCard{{background:{hover};border:{border};"
+            f"border-radius:0}}")
         self.setStyleSheet(self._normal_css)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 10, 16, 10)
-        lay.setSpacing(2)
+        lay.setContentsMargins(12, 4, 12, 4)
+        lay.setSpacing(0)
 
         t = QLabel(title)
+        t.setFixedHeight(16)
         t.setStyleSheet(
             f"background:transparent;border:none;color:{fg_title};"
-            f"font-size:12pt;font-weight:bold;"
+            f"font-size:10pt;font-weight:bold;"
             f"font-family:'{theme.UI_FONT}'")
         lay.addWidget(t)
 
         s = QLabel(subtitle)
+        s.setFixedHeight(13)
         s.setStyleSheet(
             f"background:transparent;border:none;color:{fg_sub};"
-            f"font-size:9pt;font-family:'{theme.UI_FONT}'")
-        s.setWordWrap(True)
+            f"font-size:8pt;font-family:'{theme.UI_FONT}'")
         lay.addWidget(s)
 
     def enterEvent(self, event):
@@ -127,47 +127,46 @@ class ChooseInstallDialog(QDialog):
     def __init__(self, parent):
         super().__init__(parent)
         self.choice = None
-        self.setWindowTitle("Add New")
-        self.setFixedSize(480, 380)
+        self.setWindowTitle(translate.t("dialog.add_title"))
+        self.setFixedSize(420, 310)
         self.setSizeGripEnabled(False)
         self.setStyleSheet(
-            f"QDialog{{background:{theme.BG};color:{theme.FG}}}")
+            f"QDialog{{background:{theme.BG};color:{theme.FG};border:none}}")
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 20)
-        v.setSpacing(12)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(0)
 
-        title = QLabel("Add New")
+        title = QLabel(translate.t("dialog.add_title"))
+        title.setFixedHeight(22)
         title.setStyleSheet(
             f"background:transparent;color:{theme.FG};"
-            f"font-size:16pt;font-weight:bold;"
+            f"font-size:12pt;font-weight:bold;"
             f"font-family:'{theme.UI_FONT}'")
         v.addWidget(title)
 
-        subtitle = QLabel("Choose what to create or install.")
+        subtitle = QLabel(translate.t("dialog.add_sub"))
+        subtitle.setFixedHeight(13)
         subtitle.setStyleSheet(
             f"background:transparent;color:{theme.GRAY};"
-            f"font-size:9pt;font-family:'{theme.UI_FONT}'")
+            f"font-size:8pt;font-family:'{theme.UI_FONT}'")
         v.addWidget(subtitle)
 
-        v.addSpacing(6)
+        v.addSpacing(8)
 
-        for label, sub, key, accent in (
-            ("Modrinth Modpack",
-             "Search and install from the Modrinth catalog",
-             "modrinth", True),
-            ("Blank Profile",
-             "Pick a Minecraft version and loader",
-             "blank", False),
-            ("Local file",
-             "Import a .mrpack, .zip or .xerpack pack",
-             "local", False),
+        for label_key, sub_key, key, accent in (
+            ("dialog.modrinth", "dialog.modrinth_sub", "modrinth", True),
+            ("dialog.blank", "dialog.blank_sub", "blank", False),
+            ("dialog.local", "dialog.local_sub", "local", False),
+            ("dialog.migrate", "dialog.migrate_sub", "migrate", False),
         ):
             card = _ChoiceCard(
-                label, sub, accent,
+                translate.t(label_key), translate.t(sub_key),
+                accent,
                 on_click=lambda k=key: self._pick(k),
                 parent=self)
             v.addWidget(card)
+            v.addSpacing(6)
 
         v.addStretch(1)
         fade_in(self)
@@ -184,17 +183,16 @@ class ProfileDialog(QDialog):
         self.profile = profile
         self.is_new = profile is None
         self.setWindowTitle(
-            "New Instance" if self.is_new else f"Edit — {profile.name}")
+            translate.t("dialog.profile_new") if self.is_new
+            else translate.t("dialog.profile_edit", name=profile.name))
         self.setFixedSize(700, 640)
         self.setSizeGripEnabled(False)
         self.setStyleSheet(
             f"QDialog{{background:{theme.BG};color:{theme.FG}}}"
             f"QLabel{{background:{theme.BG};color:{theme.FG};"
             f"font-family:\"{theme.UI_FONT}\";font-size:10pt}}"
-            + s_entry() + s_combo() + s_spin() + s_textedit() + s_tabs() +
-            f"QCheckBox{{background:{theme.BG};color:{theme.FG};"
-            f"font-family:\"{theme.UI_FONT}\";font-size:10pt}}"
-        )
+            + s_entry() + s_combo() + s_textedit() + s_tabs())
+
         v = QVBoxLayout(self)
         v.setContentsMargins(16, 16, 16, 16)
         v.setSpacing(10)
@@ -205,52 +203,50 @@ class ProfileDialog(QDialog):
         g1 = QGridLayout(t1)
         g1.setContentsMargins(14, 14, 14, 14)
         g1.setSpacing(8)
-        g1.addWidget(QLabel("Name"), 0, 0)
+        g1.addWidget(QLabel(translate.t("dialog.name")), 0, 0)
         self.name = QLineEdit(profile.name if profile else "My Instance")
         g1.addWidget(self.name, 0, 1)
-        g1.addWidget(QLabel("Version"), 1, 0)
+        g1.addWidget(QLabel(translate.t("dialog.version")), 1, 0)
         self.ver = QComboBox()
         ids = [x["id"] for x in releases]
         self.ver.addItems(ids)
         if profile and profile.version in ids:
             self.ver.setCurrentText(profile.version)
         g1.addWidget(self.ver, 1, 1)
-        g1.addWidget(QLabel("Loader"), 2, 0)
+        g1.addWidget(QLabel(translate.t("dialog.loader")), 2, 0)
         self.loader = QComboBox()
-        for k, label in (("vanilla", "Vanilla"), ("fabric", "Fabric"),
-                         ("forge", "Forge"), ("neoforge", "NeoForge"),
-                         ("quilt", "Quilt")):
-            self.loader.addItem(label, k)
+        for k in ("vanilla", "fabric", "forge", "neoforge", "quilt"):
+            self.loader.addItem(translate.t(f"loader.{k}"), k)
         if profile:
             idx = self.loader.findData(profile.loader)
             if idx >= 0:
                 self.loader.setCurrentIndex(idx)
         g1.addWidget(self.loader, 2, 1)
-        g1.addWidget(QLabel("RAM"), 3, 0)
+        g1.addWidget(QLabel(translate.t("dialog.ram")), 3, 0)
         self.ram = QComboBox()
-        self.ram.addItem("2 GB", "2")
-        self.ram.addItem("4 GB", "4")
-        self.ram.addItem("8 GB", "8")
-        self.ram.addItem("16 GB", "16")
+        for label, val in (("2 GB", "2"), ("4 GB", "4"),
+                           ("8 GB", "8"), ("16 GB", "16")):
+            self.ram.addItem(label, val)
         cur_gb = str(int(profile.ram)) if profile else "4"
         idx = self.ram.findData(cur_gb)
         if idx >= 0:
             self.ram.setCurrentIndex(idx)
         g1.addWidget(self.ram, 3, 1)
         g1.setRowStretch(4, 1)
-        self.tabs.addTab(t1, "Basic")
+        self.tabs.addTab(t1, translate.t("dialog.tab_basic"))
 
         t2 = QWidget()
         g2 = QVBoxLayout(t2)
         g2.setContentsMargins(14, 14, 14, 14)
         g2.setSpacing(8)
         row = QHBoxLayout()
-        row.addWidget(QLabel("GC"))
+        row.addWidget(QLabel(translate.t("dialog.gc")))
         self.gc = QComboBox()
         self.gc.addItem(
-            f"Use global ({settings.get('gc', 'G1GC')})", "")
+            translate.t("dialog.gc_global",
+                        gc=settings.get("gc", "G1GC")), "")
         for g in ("G1GC", "ZGC", "Parallel", "Serial"):
-            self.gc.addItem(f"Override: {g}", g)
+            self.gc.addItem(translate.t("dialog.gc_override", gc=g), g)
         if profile and profile.override_gc:
             idx = self.gc.findData(profile.override_gc)
             if idx >= 0:
@@ -258,7 +254,7 @@ class ProfileDialog(QDialog):
         row.addWidget(self.gc)
         row.addStretch()
         g2.addLayout(row)
-        g2.addWidget(QLabel("JVM flags"))
+        g2.addWidget(QLabel(translate.t("dialog.jvm_flags")))
         self.jvm = QPlainTextEdit()
         auto = " ".join(default_jvm_flags(
             str(int(self.ram.currentData())),
@@ -269,24 +265,24 @@ class ProfileDialog(QDialog):
         self.ram.currentIndexChanged.connect(self._refresh_jvm)
         self.gc.currentIndexChanged.connect(self._refresh_jvm)
         self._auto_str = auto
-        self.tabs.addTab(t2, "JVM")
+        self.tabs.addTab(t2, translate.t("dialog.tab_jvm"))
 
         t3 = QWidget()
         g3 = QVBoxLayout(t3)
         g3.setContentsMargins(14, 14, 14, 14)
         g3.setSpacing(8)
-        g3.addWidget(QLabel("Environment variables (overrides global)"))
+        g3.addWidget(QLabel(translate.t("dialog.env")))
         self.env = QPlainTextEdit()
-        self.env.setPlaceholderText("MANGOHUD=1")
+        self.env.setPlaceholderText(translate.t("dialog.env_ph"))
         self.env.setPlainText(profile.override_env_vars if profile else "")
         g3.addWidget(self.env, 1)
-        self.tabs.addTab(t3, "Environment")
+        self.tabs.addTab(t3, translate.t("dialog.tab_env"))
 
         t4 = QWidget()
         g4 = QGridLayout(t4)
         g4.setContentsMargins(14, 14, 14, 14)
         g4.setSpacing(8)
-        g4.addWidget(QLabel("Java"), 0, 0)
+        g4.addWidget(QLabel(translate.t("dialog.java")), 0, 0)
         jrow = QHBoxLayout()
         self.java_path = QLineEdit(
             profile.override_java_path if profile else "")
@@ -296,17 +292,20 @@ class ProfileDialog(QDialog):
                 override=settings.get("java_path", ""))
         except Exception:
             resolved = None
-        self.java_path.setPlaceholderText(
-            f"auto-detected: {resolved}" if resolved else "auto-detect")
+        if resolved:
+            self.java_path.setPlaceholderText(
+                translate.t("dialog.java_auto", path=resolved))
+        else:
+            self.java_path.setPlaceholderText(
+                translate.t("dialog.java_autodetect"))
         jrow.addWidget(self.java_path, 1)
-        find_btn = QPushButton("Auto")
-        find_btn.setToolTip("Auto-detect")
+        find_btn = QPushButton(translate.t("btn.auto"))
         find_btn.setAutoDefault(False)
         find_btn.setDefault(False)
         find_btn.setStyleSheet(s_btn(theme.BG2, theme.FG, theme.BG3))
         find_btn.clicked.connect(self._find_java)
         jrow.addWidget(find_btn)
-        browse_btn = QPushButton("Browse")
+        browse_btn = QPushButton(translate.t("btn.browse"))
         browse_btn.setAutoDefault(False)
         browse_btn.setDefault(False)
         browse_btn.setStyleSheet(s_btn(theme.BG2, theme.FG, theme.BG3))
@@ -314,63 +313,25 @@ class ProfileDialog(QDialog):
         jrow.addWidget(browse_btn)
         g4.addLayout(jrow, 0, 1)
 
-        g4.addWidget(QLabel("Wrapper"), 1, 0)
+        g4.addWidget(QLabel(translate.t("dialog.wrapper")), 1, 0)
         self.wrapper = QLineEdit(
             profile.override_wrapper if profile else "")
-        self.wrapper.setPlaceholderText("mangohud --dlsym")
+        self.wrapper.setPlaceholderText(translate.t("dialog.wrapper_ph"))
         g4.addWidget(self.wrapper, 1, 1)
-
-        has_sodium = False
-        if profile:
-            try:
-                mods_dir = profile.dir / "mods"
-                if mods_dir.exists():
-                    for f in mods_dir.iterdir():
-                        if "sodium" in f.name.lower():
-                            has_sodium = True
-                            break
-            except Exception:
-                pass
-
-        self.nvidia = QCheckBox(
-            "Apply NVIDIA threaded-optimizations fix")
-        self.nvidia.setChecked(
-            getattr(profile, "override_nvidia_fix", False)
-            if profile else False)
-        self.nvidia.setEnabled(has_sodium)
-        if has_sodium:
-            self.nvidia.setToolTip(
-                "Only useful with the Sodium mod installed.")
-        else:
-            self.nvidia.setToolTip(
-                "No Sodium mod found in this instance's mods folder. "
-                "Install Sodium first to enable this.")
-        g4.addWidget(self.nvidia, 2, 0, 1, 2)
-
-        sodium_hint = QLabel(
-            "Only useful with the Sodium mod installed."
-            if has_sodium else
-            "Install Sodium to enable this option.")
-        sodium_hint.setStyleSheet(
-            f"background:transparent;color:{theme.GRAY};font-size:9pt")
-        g4.addWidget(sodium_hint, 3, 0, 1, 2)
-
-        filler = QFrame()
-        filler.setStyleSheet(
-            f"QFrame{{background:{theme.BG2};border:none}}")
-        g4.addWidget(filler, 4, 0, 1, 2)
-        g4.setRowStretch(4, 1)
-        self.tabs.addTab(t4, "Advanced")
+        g4.setRowStretch(2, 1)
+        self.tabs.addTab(t4, translate.t("dialog.tab_advanced"))
 
         btns = QHBoxLayout()
         btns.addStretch()
-        c = QPushButton("Cancel")
+        c = QPushButton(translate.t("btn.cancel"))
         c.setAutoDefault(False)
         c.setDefault(False)
         c.setStyleSheet(s_btn(theme.BG2, theme.FG, theme.BG3))
         c.clicked.connect(self.reject)
         btns.addWidget(c)
-        ok = QPushButton("Create" if self.is_new else "Save")
+        ok = QPushButton(
+            translate.t("btn.create") if self.is_new
+            else translate.t("btn.save"))
         ok.setAutoDefault(False)
         ok.setDefault(False)
         ok.setStyleSheet(s_btn_accent())
@@ -396,12 +357,13 @@ class ProfileDialog(QDialog):
         javas = find_javas()
         if not javas:
             QMessageBox.information(
-                self, "No Java",
-                "No Java installations detected.")
+                self, translate.t("menu.no_java"),
+                translate.t("menu.no_java_msg"))
             return
-        items = [f"{label}  —  {path}" for path, (label, _) in javas]
+        items = [f"{label} — {path}" for path, (label, _) in javas]
         choice, ok = QInputDialog.getItem(
-            self, "Select Java", "Detected Java installations:",
+            self, translate.t("menu.browse_java_title"),
+            translate.t("menu.browse_java_installs"),
             items, 0, False)
         if ok and choice:
             idx = items.index(choice)
@@ -409,7 +371,7 @@ class ProfileDialog(QDialog):
 
     def _browse_java(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select java executable", str(Path.home()),
+            self, translate.t("menu.select_java_file"), str(Path.home()),
             "Java (java)" if not IS_WIN else "Java (*.exe)")
         if path:
             self.java_path.setText(path)
@@ -423,7 +385,6 @@ class ProfileDialog(QDialog):
         profile.override_env_vars = self.env.toPlainText().strip()
         profile.override_java_path = self.java_path.text().strip()
         profile.override_wrapper = self.wrapper.text().strip()
-        profile.override_nvidia_fix = self.nvidia.isChecked()
 
     def values(self):
         return (self.name.text().strip(), self.ver.currentText(),
@@ -431,5 +392,4 @@ class ProfileDialog(QDialog):
                 self.loader.currentData())
 
 
-# ---- Re-export for callers that do `from ui.dialogs import ModpackSearchDialog`
 from browse.modpacks import ModpackSearchDialog  # noqa: E402,F401

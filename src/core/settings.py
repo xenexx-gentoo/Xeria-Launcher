@@ -1,4 +1,5 @@
-import json, platform
+import json
+import platform
 from pathlib import Path
 from core.paths import XERIA_ROOT
 
@@ -6,6 +7,7 @@ SETTINGS_FILE = XERIA_ROOT / "settings.json"
 
 DEFAULTS = {
     "username": "Player",
+    "language": "",
     "java_path": "",
     "wrapper_command": "",
     "jvm_flags": "",
@@ -18,9 +20,6 @@ DEFAULTS = {
     "account": {},
     "accounts": [],
     "active_account": 0,
-    # Auto-check schedule for modpack content, in seconds.
-    # 0 = never, 3600 = hourly, 86400 = daily,
-    # 604800 = weekly, 2592000 = monthly.
     "auto_check_interval": 86400,
     "auto_check_last_run": 0,
 }
@@ -45,6 +44,13 @@ class Settings:
     def save(self):
         SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(self._data, indent=2))
+
+    def get_language(self):
+        return self.get("language", "") or ""
+
+    def set_language(self, code):
+        self.set("language", code)
+        self.save()
 
     def get_account(self):
         from core import auth
@@ -100,7 +106,8 @@ class Settings:
 def detect_gpu():
     if platform.system() == "Windows":
         return "unknown"
-    import glob, os
+    import glob
+    import os
     if glob.glob("/proc/driver/nvidia/version"):
         return "nvidia"
     if os.path.exists("/usr/bin/nvidia-smi"):
