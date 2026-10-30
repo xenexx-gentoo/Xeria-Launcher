@@ -13,12 +13,13 @@ from PyQt6.QtWidgets import (
 from core import theme
 from core import hardware
 from core import translate
-from browse.common import DETAIL_WIDTH
 from browse.utils import (
     ICON_SIZE_DETAIL, make_placeholder,
     square_icon, square_icon_pixmap, crop_alpha_bbox,
 )
 
+
+DETAIL_WIDTH = 400
 
 HW = hardware.get()
 

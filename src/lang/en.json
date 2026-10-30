@@ -360,7 +360,9 @@
   "modpack.loader_error": "Loader install failed: {err}",
   "modpack.target_version": "Version",
   "modpack.any_version": "Any version",
-  "modpack.declared_loader": "Loader (from pack)",
+  "modpack.loader": "Loader",
+  "modpack.loader_pack": "Pack (declared)",
+  "modpack.declared_loader": "Declared loader",
 
   "loaders.start": "Loader install: {loader} for MC {version}",
   "loaders.vanilla_noop": "Vanilla, nothing to install",

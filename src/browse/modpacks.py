@@ -27,15 +27,19 @@ class _NoWheelCombo(QComboBox):
 
 class ModpackSearchDialog(BrowseBase):
     DEFAULT_QUERY = "fabulously optimized"
+    KNOWN_LOADERS = ("fabric", "quilt", "forge", "neoforge")
 
     def __init__(self, parent, log_fn=None):
         self.result = None
         self._mc_version = ""
-        self._forced_loader = "pack"
+        self._forced_loader = self.KNOWN_LOADERS[0]
         super().__init__(parent, _DummyProfile(), log_fn or (lambda t, m: None))
         self.setWindowTitle(translate.t("title.modpacks"))
         self._build_version_picker()
-        self.list.currentRowChanged.connect(self._on_pack_row_changed)
+        self.head_row.addStretch()
+        self.main_layout.insertWidget(
+            self.main_layout.count() - 1, self.search_body, 1
+        )
         if not self.search.text():
             self.search.setText(self.DEFAULT_QUERY)
 
@@ -44,7 +48,9 @@ class ModpackSearchDialog(BrowseBase):
         bar.setSpacing(8)
 
         ver_lbl = QLabel(translate.t("modpack.target_version"))
-        ver_lbl.setStyleSheet(f"color:{theme.FG};font-size:10pt;background:transparent")
+        ver_lbl.setStyleSheet(
+            f"color:{theme.FG};font-size:10pt;background:transparent"
+        )
         bar.addWidget(ver_lbl)
 
         self._version_box = _NoWheelCombo()
@@ -54,23 +60,20 @@ class ModpackSearchDialog(BrowseBase):
 
         lo_lbl = QLabel(translate.t("modpack.loader"))
         lo_lbl.setStyleSheet(
-            f"color:{theme.FG};font-size:10pt;background:transparent;padding-left:12px"
+            f"color:{theme.FG};font-size:10pt;"
+            f"background:transparent;padding-left:12px"
         )
         bar.addWidget(lo_lbl)
 
         self._loader_box = _NoWheelCombo()
         self._loader_box.setStyleSheet(s_combo())
-        self._loader_box.addItem(translate.t("modpack.loader_pack"), "pack")
-        for key in ("fabric", "quilt", "forge", "neoforge", "vanilla"):
+        # No "any" entry, no vanilla — a loader is always required.
+        for key in self.KNOWN_LOADERS:
             self._loader_box.addItem(translate.t(f"loader.{key}"), key)
+        idx = self._loader_box.findData(self._forced_loader)
+        if idx >= 0:
+            self._loader_box.setCurrentIndex(idx)
         bar.addWidget(self._loader_box)
-
-        self._declared_lbl = QLabel(translate.t("modpack.declared_loader") + ": —")
-        self._declared_lbl.setStyleSheet(
-            f"color:{theme.GRAY};font-size:10pt;background:transparent;"
-            f"padding-left:12px"
-        )
-        bar.addWidget(self._declared_lbl)
 
         bar.addStretch(1)
 
@@ -119,76 +122,37 @@ class ModpackSearchDialog(BrowseBase):
         self._version_box.blockSignals(False)
 
     def _on_mc_version_changed(self, _idx):
-        self._mc_version = self._version_box.currentData() or ""
+        new_v = self._version_box.currentData() or ""
+        if new_v == self._mc_version:
+            return
+        self._mc_version = new_v
         q = self.search.text().strip()
         if q:
             self._last_query = ""
             self.search_now()
 
     def _on_loader_changed(self, _idx):
-        self._forced_loader = self._loader_box.currentData() or "pack"
-
-    def _on_pack_row_changed(self, row):
-        if row < 0 or row >= len(self.results_data):
-            self._declared_lbl.setText(translate.t("modpack.declared_loader") + ": —")
+        new_l = self._loader_box.currentData() or ""
+        if not new_l or new_l == self._forced_loader:
             return
-        hit = self.results_data[row]
-        pid = hit.get("id") or hit.get("project_id")
-        if not pid:
-            self._declared_lbl.setText(translate.t("modpack.declared_loader") + ": —")
+        self._forced_loader = new_l
+        q = self.search.text().strip()
+        if not q:
             return
-        self._load_declared_loader(pid)
-
-    def _load_declared_loader(self, project_id):
-        self._declared_lbl.setText(translate.t("modpack.declared_loader") + ": …")
-
-        def task(log, progress, progress_end):
-            return modrinth.list_versions(project_id)
-
-        from core.worker import Worker
-
-        w = Worker(task)
-        w.log.connect(self._log, Qt.ConnectionType.QueuedConnection)
-        w.done.connect(
-            lambda vs, p=project_id: self._on_declared_ready(p, vs),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self._declared_worker = w
-        w.start()
-
-    def _on_declared_ready(self, project_id, versions):
-        if self._deleted:
-            return
-        row = self.list.currentRow()
-        if row < 0 or row >= len(self.results_data):
-            return
-        hit = self.results_data[row]
-        if (hit.get("id") or hit.get("project_id")) != project_id:
-            return
-        names = set()
-        for v in versions or []:
-            for f in v.get("files", []):
-                if not f["filename"].endswith(".mrpack"):
-                    continue
-                for loader_name in v.get("loaders") or []:
-                    names.add(loader_name)
-        if not names:
-            self._declared_lbl.setText(translate.t("modpack.declared_loader") + ": —")
-            return
-        display = ", ".join(sorted(n.capitalize() for n in names))
-        self._declared_lbl.setText(
-            f"{translate.t('modpack.declared_loader')}: {display}"
-        )
+        self._last_query = ""
+        self.search_now()
 
     def _search_url(self, query, offset=0):
         facets = [["project_type:modpack"]]
         if self._mc_version:
             facets.append([f"versions:{self._mc_version}"])
+        # Loader is always set — vanilla-only packs can never match.
+        facets.append([f"categories:{self._forced_loader}"])
         return (
             "https://api.modrinth.com/v2/search",
             {
                 "query": query,
-                "limit": self.PAGE_SIZE * 10,
+                "limit": self.PAGE_SIZE,
                 "offset": offset,
                 "facets": json.dumps(facets),
             },
@@ -216,6 +180,9 @@ class ModpackSearchDialog(BrowseBase):
     def row_subtitle(self, hit):
         return translate.t("browse.meta_modpack", author=hit["author"])
 
+    def row_subtitle_color(self):
+        return theme.ACCENT
+
     def install_selected(self):
         hit = self._selected_hit()
         if hit is None:
@@ -230,6 +197,7 @@ class ModpackSearchDialog(BrowseBase):
         return self._mc_version
 
     def selected_loader(self):
+        # Always a concrete loader now; "" is never returned.
         return self._forced_loader
 
 

@@ -50,7 +50,7 @@ class Profile:
             "override_wrapper": self.override_wrapper,
             "override_nvidia_fix": self.override_nvidia_fix,
             "mods_meta": self.mods_meta,
-            "_external_dir": (str(self._external_dir) if self._external_dir else None),
+            "_external_dir": None,
         }
 
     def load(self, data):
@@ -63,7 +63,8 @@ class Profile:
         self.override_env_vars = data.get("override_env_vars", "")
         self.override_java_path = data.get("override_java_path", "")
         self.override_wrapper = data.get("override_wrapper", "")
-        self.override_nvidia_fix = bool(data.get("override_nvidia_fix", False))
+        self.override_nvidia_fix = bool(
+            data.get("override_nvidia_fix", False))
         mm = data.get("mods_meta", {})
         if isinstance(mm, dict):
             self.mods_meta = mm
@@ -75,7 +76,8 @@ class Profile:
 
     def save(self):
         PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-        self.json_path.write_text(json.dumps(self.to_dict(), indent=2))
+        self.json_path.write_text(
+            json.dumps(self.to_dict(), indent=2))
 
     @classmethod
     def load_all(cls):
