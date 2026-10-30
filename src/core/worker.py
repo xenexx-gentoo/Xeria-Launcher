@@ -1,4 +1,6 @@
+import contextlib
 import threading
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 _shutdown = threading.Event()
@@ -18,21 +20,15 @@ def unregister_worker(w):
 
 
 def stop_all_workers(timeout_ms=3000):
-    """Called at application exit. Stops every live Worker."""
     _shutdown.set()
     with _all_lock:
         workers = list(_all_workers)
     for w in workers:
-        try:
+        with contextlib.suppress(Exception):
             w.quit()
             if not w.wait(timeout_ms):
                 _leaked_threads.append(w)
-                try:
-                    w.setParent(None)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                w.setParent(None)
     with _all_lock:
         _all_workers.clear()
 
@@ -54,15 +50,17 @@ class Worker(QThread):
             if _shutdown.is_set():
                 self.done.emit(None)
                 return
-            r = self.fn(*self.args, log=self.log.emit,
-                        progress=self.progress.emit,
-                        progress_end=self.progress_end.emit)
+            r = self.fn(
+                *self.args,
+                log=self.log.emit,
+                progress=self.progress.emit,
+                progress_end=self.progress_end.emit,
+            )
             self.done.emit(r)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             import traceback
+
             traceback.print_exc()
-            try:
+            with contextlib.suppress(Exception):
                 self.log.emit("error", f"crashed: {e}")
-            except Exception:
-                pass
             self.done.emit(None)

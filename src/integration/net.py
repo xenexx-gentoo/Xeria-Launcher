@@ -1,3 +1,5 @@
+import contextlib
+
 import httpx
 
 _UA = "Xeria-Launcher/2.504"
@@ -26,8 +28,8 @@ def get(url, **kwargs):
     return client().get(url, **kwargs)
 
 
-def post(url, **kwargs):
-    return client().post(url, **kwargs)
+def post(url, data=None, json=None, **kwargs):
+    return client().post(url, data=data, json=json, **kwargs)
 
 
 def stream(method, url, **kwargs):
@@ -37,8 +39,6 @@ def stream(method, url, **kwargs):
 def close():
     global _client
     if _client is not None:
-        try:
+        with contextlib.suppress(Exception):
             _client.close()
-        except Exception:
-            pass
         _client = None

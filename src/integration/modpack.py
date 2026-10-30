@@ -1,8 +1,9 @@
-import json, zipfile, shutil, threading
-from pathlib import Path
+import json
+import shutil
+import threading
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import requests
+from pathlib import Path
 
 from core.paths import PROFILES_DIR
 from instances.profile import Profile
@@ -10,23 +11,23 @@ from integration import net as http
 
 
 def read_index(mrpack_path):
-    with zipfile.ZipFile(mrpack_path) as z:
-        with z.open("modrinth.index.json") as f:
-            return json.loads(f.read().decode("utf-8"))
+    with zipfile.ZipFile(mrpack_path) as z, z.open("modrinth.index.json") as f:
+        return json.loads(f.read().decode("utf-8"))
 
 
 def detect_loader(deps):
-    for key, name in (("fabric-loader", "fabric"),
-                      ("quilt-loader", "quilt"),
-                      ("forge", "forge"),
-                      ("neoforge", "neoforge")):
+    for key, name in (
+        ("fabric-loader", "fabric"),
+        ("quilt-loader", "quilt"),
+        ("forge", "forge"),
+        ("neoforge", "neoforge"),
+    ):
         if key in deps:
             return name, deps[key]
     return "vanilla", ""
 
 
-def install(mrpack_path, profile_name=None, log=None, progress=None,
-            progress_end=None):
+def install(mrpack_path, profile_name=None, log=None, progress=None, progress_end=None):
     def L(tag, msg):
         if log:
             log(tag, msg)
@@ -38,7 +39,7 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
     L("info", f"reading {mrpack_path.name}")
     try:
         index = read_index(mrpack_path)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         L("error", f"failed to read modpack: {e}")
         return None
 
@@ -63,7 +64,7 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
     p.version = mc_version
     p.ram = "4"
     p.loader = loader
-    p.dir
+    _ = p.dir
     p.save()
     L("ok", f"created profile '{profile_name}'")
 
@@ -71,7 +72,6 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
     L("sys", f"{len(files)} files to download")
     lock = threading.Lock()
     done = [0]
-    session = requests.Session()
 
     def fetch(entry):
         url = entry.get("downloads", [None])[0]
@@ -81,15 +81,14 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
         dest = p.dir / rel
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            with session.get(url, stream=True, timeout=60) as r:
+            with http.stream("GET", url) as r:
                 r.raise_for_status()
                 tmp = dest.with_suffix(dest.suffix + ".part")
                 with open(tmp, "wb") as f:
-                    for chunk in r.iter_content(65536):
-                        f.write(chunk)
+                    f.writelines(r.iter_bytes(65536))
                 tmp.replace(dest)
             ok = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             L("error", f"failed {rel[-50:]}: {e}")
             ok = False
         with lock:
@@ -116,22 +115,26 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
                 for member in z.namelist():
                     if not member.startswith(prefix):
                         continue
-                    rel = member[len(prefix):]
+                    rel = member[len(prefix) :]
                     if not rel or rel.endswith("/"):
                         continue
                     target = p.dir / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with z.open(member) as src, open(target, "wb") as dst:
                         shutil.copyfileobj(src, dst)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         L("warn", f"override extraction failed: {e}")
 
     mods_dir = p.dir / "mods"
     if mods_dir.exists():
         jars = sorted(
-            [f for f in mods_dir.iterdir()
-             if f.is_file() and f.suffix.lower() == ".jar"],
-            key=lambda f: f.name.lower())
+            [
+                f
+                for f in mods_dir.iterdir()
+                if f.is_file() and f.suffix.lower() == ".jar"
+            ],
+            key=lambda f: f.name.lower(),
+        )
         if jars:
             L("sys", f"resolving {len(jars)} mods against Modrinth")
             try:
@@ -143,24 +146,26 @@ def install(mrpack_path, profile_name=None, log=None, progress=None,
 
                 resolved = modrinth.resolve_mods_parallel(
                     [str(j) for j in jars],
-                    mc_version, "mod", loader, workers=3,
-                    progress=prog)
+                    mc_version,
+                    "mod",
+                    loader,
+                    workers=3,
+                    progress=prog,
+                )
                 p.mods_meta = resolved
                 p.save()
                 if progress_end:
                     progress_end()
-                hits = sum(1 for r in resolved.values()
-                           if r.get("project_id"))
+                hits = sum(1 for r in resolved.values() if r.get("project_id"))
                 L("ok", f"resolved {hits}/{len(jars)} mods")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 L("warn", f"mod resolution failed: {e}")
 
     L("ok", f"modpack '{profile_name}' installed")
     return profile_name
 
 
-def export_mrpack(profile, dest_path, log=None, progress=None,
-                  progress_end=None):
+def export_mrpack(profile, dest_path, log=None, progress=None, progress_end=None):
     import hashlib
 
     def L(tag, msg):
@@ -191,49 +196,47 @@ def export_mrpack(profile, dest_path, log=None, progress=None,
 
     try:
         from core.paths import MODRINTH_API
-    except Exception:
+    except Exception:  # noqa: BLE001
         MODRINTH_API = None
 
     if mods_dir.exists():
-        jars = [f for f in mods_dir.iterdir()
-                if f.is_file() and f.suffix == ".jar"]
+        jars = [f for f in mods_dir.iterdir() if f.is_file() and f.suffix == ".jar"]
         L("sys", f"hashing {len(jars)} mods")
         for i, jar in enumerate(jars, 1):
             try:
                 sha1 = hashlib.sha1(jar.read_bytes()).hexdigest()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 overrides.append(jar)
                 continue
             found = None
             if MODRINTH_API:
                 try:
-                    r = requests.get(
+                    r = http.get(
                         f"{MODRINTH_API}/version_file/{sha1}",
                         headers={"User-Agent": "Xeria-Launcher/2.504"},
-                        timeout=10)
+                    )
                     if r.status_code == 200:
                         found = r.json()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
             if found:
                 fname = found.get("file_name", jar.name)
                 urls = found.get("files", [])
                 primary = next(
-                    (u for u in urls if u.get("primary")),
-                    urls[0] if urls else None)
+                    (u for u in urls if u.get("primary")), urls[0] if urls else None
+                )
                 if primary and "url" in primary:
-                    index["files"].append({
-                        "path": f"mods/{fname}",
-                        "hashes": {
-                            "sha1": sha1,
-                            "sha512":
-                                primary.get("hashes", {}).get(
-                                    "sha512", ""),
-                        },
-                        "downloads": [primary["url"]],
-                        "fileSize": primary.get(
-                            "size", jar.stat().st_size),
-                    })
+                    index["files"].append(
+                        {
+                            "path": f"mods/{fname}",
+                            "hashes": {
+                                "sha1": sha1,
+                                "sha512": primary.get("hashes", {}).get("sha512", ""),
+                            },
+                            "downloads": [primary["url"]],
+                            "fileSize": primary.get("size", jar.stat().st_size),
+                        }
+                    )
                 else:
                     overrides.append(jar)
             else:
@@ -241,8 +244,7 @@ def export_mrpack(profile, dest_path, log=None, progress=None,
             if progress and i % 5 == 0:
                 progress("hash", i, len(jars), "", "")
 
-    L("ok", f"{len(index['files'])} mods matched, "
-            f"{len(overrides)} bundled")
+    L("ok", f"{len(index['files'])} mods matched, {len(overrides)} bundled")
     if progress_end:
         progress_end()
 
@@ -251,14 +253,12 @@ def export_mrpack(profile, dest_path, log=None, progress=None,
         for src in overrides:
             arc = f"overrides/{src.relative_to(game_dir)}"
             z.write(src, arc)
-        for sub in ("config", "resourcepacks", "shaderpacks", "saves",
-                    "options.txt"):
+        for sub in ("config", "resourcepacks", "shaderpacks", "saves", "options.txt"):
             p = game_dir / sub
             if p.is_dir():
                 for f in p.rglob("*"):
                     if f.is_file():
-                        z.write(f, f"overrides/"
-                                   f"{f.relative_to(game_dir)}")
+                        z.write(f, f"overrides/{f.relative_to(game_dir)}")
             elif p.is_file():
                 z.write(p, f"overrides/{p.name}")
 

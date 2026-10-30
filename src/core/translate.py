@@ -1,3 +1,4 @@
+import contextlib
 import json
 import locale
 from pathlib import Path
@@ -13,16 +14,14 @@ def _load():
     if not _DIR.exists():
         return
     for f in _DIR.glob("*.json"):
-        try:
+        with contextlib.suppress(Exception):
             _STRINGS[f.stem] = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
-            pass
 
 
 def _detect():
     try:
         lang, _ = locale.getdefaultlocale()
-    except Exception:
+    except Exception:  # noqa: BLE001
         lang = None
     if lang and lang.lower().startswith(("ru", "be", "uk", "kk")):
         return "ru" if "ru" in _STRINGS else "en"
@@ -44,6 +43,10 @@ def get_language():
 
 def available_languages():
     return [("en", "English (US)"), ("ru", "Русский")]
+
+
+def language_display_name(code):
+    return dict(available_languages()).get(code, code)
 
 
 def set_language(code):

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import re
 
@@ -12,9 +13,10 @@ from PyQt6.QtWidgets import (
 from core import theme
 from core import hardware
 from core import translate
-from browse.common import (
-    ICON_SIZE_DETAIL, DETAIL_WIDTH, make_placeholder,
-    square_icon, square_icon_pixmap, _crop_alpha_bbox,
+from browse.common import DETAIL_WIDTH
+from browse.utils import (
+    ICON_SIZE_DETAIL, make_placeholder,
+    square_icon, square_icon_pixmap, crop_alpha_bbox,
 )
 
 
@@ -72,7 +74,7 @@ class _HScrollArea(QScrollArea):
 
 
 class DetailPanel(QFrame):
-    ANIM_MS = 140 if HW.tier == "potato" else 220
+    ANIM_MS = 160
     SHOTS_HEIGHT = 180
     THUMB_H = 130
 
@@ -84,30 +86,39 @@ class DetailPanel(QFrame):
         self._body_html = ""
 
         self.setStyleSheet(
-            f"QFrame{{background:{theme.BG2};border:none}}"
+            f"QFrame{{background:transparent;outline:none;}}"
+            f"QFrame:focus{{outline:none;}}"
             f"QLabel{{background:transparent;color:{theme.FG};"
-            f"font-family:'{theme.UI_FONT}'}}")
+            f"outline:none;"
+            f"font-family:'{theme.UI_FONT}'}}"
+            f"QLabel:focus{{outline:none;}}")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
         header = QFrame()
+        header.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         header.setStyleSheet(
-            f"QFrame{{background:{theme.BG2};border:none;"
-            f"border-bottom:1px solid {theme.BORDER}}}")
+            "QFrame{background:transparent;outline:none;}")
+        header.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         hh = QHBoxLayout(header)
         hh.setContentsMargins(14, 12, 14, 12)
         hh.setSpacing(12)
 
         self.icon_lbl = QLabel()
+        self.icon_lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.icon_lbl.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.icon_lbl.setFixedSize(ICON_SIZE_DETAIL, ICON_SIZE_DETAIL)
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_lbl.setStyleSheet(
-            f"background:{theme.BG3};border:1px solid {theme.BORDER}")
+            "background:transparent;outline:none;")
 
         ic_host = QWidget()
-        ic_host.setStyleSheet("background:transparent;border:none")
+        ic_host.setStyleSheet("background:transparent;")
         ic_host.setFixedWidth(ICON_SIZE_DETAIL)
         ic_col = QVBoxLayout(ic_host)
         ic_col.setContentsMargins(0, 0, 0, 0)
@@ -118,7 +129,7 @@ class DetailPanel(QFrame):
         hh.addWidget(ic_host, 0)
 
         text_host = QWidget()
-        text_host.setStyleSheet("background:transparent;border:none")
+        text_host.setStyleSheet("background:transparent;")
         text_host.setSizePolicy(QSizePolicy.Policy.Expanding,
                                 QSizePolicy.Policy.Preferred)
         tcol = QVBoxLayout(text_host)
@@ -127,16 +138,22 @@ class DetailPanel(QFrame):
         tcol.addStretch(1)
 
         self.title_lbl = QLabel("")
+        self.title_lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.title_lbl.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.title_lbl.setWordWrap(True)
         self.title_lbl.setStyleSheet(
             f"color:{theme.FG};font-weight:bold;font-size:14pt;"
-            f"background:transparent;border:none")
+            f"background:transparent;outline:none;")
         tcol.addWidget(self.title_lbl)
 
         self.meta_lbl = QLabel("")
+        self.meta_lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.meta_lbl.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.meta_lbl.setStyleSheet(
             f"color:{theme.GRAY};font-size:9pt;"
-            f"background:transparent;border:none")
+            f"background:transparent;outline:none;")
         tcol.addWidget(self.meta_lbl)
         tcol.addStretch(1)
         hh.addWidget(text_host, 1)
@@ -147,24 +164,33 @@ class DetailPanel(QFrame):
         self.desc_view.setOpenLinks(False)
         self.desc_view.anchorClicked.connect(self._open_link)
         self.desc_view.setFrameShape(QFrame.Shape.NoFrame)
+        self.desc_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.desc_view.viewport().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.desc_view.viewport().setAutoFillBackground(False)
         self.desc_view.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.desc_view.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.desc_view.setSizePolicy(QSizePolicy.Policy.Expanding,
                                      QSizePolicy.Policy.Expanding)
+        self.desc_view.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.desc_view.setStyleSheet(
-            f"QTextBrowser{{background:{theme.BG2};color:{theme.FG};"
-            f"border:none;padding:14px;"
-            f"font-family:'{theme.UI_FONT}';font-size:10pt}}")
+            f"QTextBrowser{{background:transparent;color:{theme.FG};"
+            f"padding:14px;outline:none;"
+            f"font-family:'{theme.UI_FONT}';font-size:10pt}}"
+            f"QTextBrowser:focus{{outline:none;}}")
         self.desc_view.document().setDefaultStyleSheet(
             f"a {{ color: {theme.ACCENT}; text-decoration: underline; }}")
         outer.addWidget(self.desc_view, 1)
 
         self.shots_frame = QFrame()
+        self.shots_frame.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.shots_frame.setStyleSheet(
-            f"QFrame{{background:{theme.BG3};border:none;"
-            f"border-top:1px solid {theme.ACCENT}}}")
+            f"QFrame{{background:transparent;outline:none;"
+            f"border:none;}}")
+        self.shots_frame.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.shots_frame.setFixedHeight(self.SHOTS_HEIGHT)
         self.shots_frame.setVisible(False)
 
@@ -172,28 +198,41 @@ class DetailPanel(QFrame):
         sf.setContentsMargins(0, 0, 0, 0)
         sf.setSpacing(0)
 
-        shots_header = QLabel("  " + translate.t("header.screenshots"))
-        shots_header.setFixedHeight(22)
-        shots_header.setStyleSheet(
+        self.shots_header = QLabel(
+            "  " + translate.t("header.screenshots"))
+        self.shots_header.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.shots_header.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+        self.shots_header.setFixedHeight(22)
+        self.shots_header.setStyleSheet(
             f"color:{theme.ACCENT};"
             f"font-family:'{theme.UI_FONT}';font-size:8pt;"
-            f"font-weight:bold;letter-spacing:1px;"
+            f"font-weight:bold;letter-spacing:1px;outline:none;"
             f"background:transparent;border:none")
-        sf.addWidget(shots_header)
+        sf.addWidget(self.shots_header)
 
         self.shots_scroll = _HScrollArea()
+        self.shots_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.shots_scroll.viewport().setFocusPolicy(
+            Qt.FocusPolicy.NoFocus)
         self.shots_scroll.setWidgetResizable(True)
         self.shots_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.shots_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.shots_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.shots_scroll.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.shots_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.shots_scroll.setStyleSheet(
-            f"QScrollArea{{background:{theme.BG3};border:none}}")
+            "QScrollArea{background:transparent;outline:none;}")
 
         self.shots_host = QWidget()
         self.shots_host.setStyleSheet(
-            f"background:{theme.BG3};border:none")
+            "background:transparent;outline:none;")
+        self.shots_host.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.shots_row = QHBoxLayout(self.shots_host)
         self.shots_row.setContentsMargins(8, 4, 8, 8)
         self.shots_row.setSpacing(8)
@@ -207,6 +246,11 @@ class DetailPanel(QFrame):
         self.setMaximumWidth(0)
         self.setVisible(False)
 
+        for _lbl in self.findChildren(QLabel):
+            _lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            _lbl.setAttribute(
+                Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+
     def _open_link(self, url):
         QDesktopServices.openUrl(url)
 
@@ -218,24 +262,41 @@ class DetailPanel(QFrame):
         self.desc_view.verticalScrollBar().setValue(0)
         self.shots_scroll.horizontalScrollBar().setValue(0)
 
+    def force_close(self):
+        if self._anim is not None:
+            with contextlib.suppress(Exception):
+                self._anim.stop()
+            self._anim = None
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(0)
+        self.setVisible(False)
+
     def close_panel(self):
         if not self.isVisible():
             return
         self._animate_width(self.maximumWidth(), 0,
-                            on_done=lambda: self.setVisible(False))
+                            on_done=self.force_close)
 
     def _animate_width(self, start, end, on_done=None):
-        if HW.tier == "potato":
-            self.setMaximumWidth(int(end))
-            if on_done:
-                on_done()
-            return
         if self._anim is not None:
-            self._anim.stop()
+            with contextlib.suppress(Exception):
+                self._anim.stop()
+            self._anim = None
+        end = int(end)
+        if not getattr(HW, "animations", True):
+            if end == 0:
+                self.force_close()
+            else:
+                self.setMinimumWidth(0)
+                self.setMaximumWidth(end)
+                if on_done:
+                    on_done()
+            return
+        self.setMinimumWidth(0)
         a = QPropertyAnimation(self, b"maximumWidth", self)
         a.setDuration(self.ANIM_MS)
         a.setStartValue(int(start))
-        a.setEndValue(int(end))
+        a.setEndValue(end)
         a.setEasingCurve(QEasingCurve.Type.OutCubic)
         if on_done:
             a.finished.connect(on_done)
@@ -303,7 +364,7 @@ class DetailPanel(QFrame):
             try:
                 body = json.loads(
                     bytes(data).decode("utf-8")).get("body") or ""
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return
             html = _md_to_html(body)
             if HW.enable_body_cache:
@@ -318,7 +379,7 @@ class DetailPanel(QFrame):
         if pm is None or pm.isNull():
             self.icon_lbl.clear()
             return
-        cropped = _crop_alpha_bbox(pm)
+        cropped = crop_alpha_bbox(pm)
         canvas = square_icon_pixmap(cropped, ICON_SIZE_DETAIL)
         if canvas is None:
             self.icon_lbl.clear()
@@ -343,10 +404,13 @@ class DetailPanel(QFrame):
                            Qt.TransformationMode.SmoothTransformation)
 
         lbl = QLabel()
+        lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        lbl.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         lbl.setFixedSize(scaled.width(), scaled.height())
         lbl.setPixmap(scaled)
         lbl.setStyleSheet(
-            f"background:{theme.BG2};border:1px solid {theme.BORDER}")
+            "background:transparent;outline:none;")
 
         self.shots_row.insertWidget(self.shots_row.count() - 1, lbl)
         if not self.shots_frame.isVisible():

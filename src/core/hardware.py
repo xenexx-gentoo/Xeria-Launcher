@@ -18,11 +18,18 @@ def _total_ram_gb():
                         return kb / 1024 / 1024
         if IS_MAC:
             import subprocess
-            out = subprocess.run(["sysctl", "-n", "hw.memsize"],
-                                 capture_output=True, text=True, timeout=5)
+
+            out = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
             return int(out.stdout.strip()) / 1024 / 1024 / 1024
         if IS_WIN:
             import ctypes
+
             class MEMORYSTATUSEX(ctypes.Structure):
                 _fields_ = [
                     ("dwLength", ctypes.c_ulong),
@@ -35,11 +42,12 @@ def _total_ram_gb():
                     ("ullAvailVirtual", ctypes.c_ulonglong),
                     ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
                 ]
+
             stat = MEMORYSTATUSEX()
             stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
             return stat.ullTotalPhys / 1024 / 1024 / 1024
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     return 0.0
 
@@ -47,15 +55,27 @@ def _total_ram_gb():
 def _cpu_count():
     try:
         return os.cpu_count() or 1
-    except Exception:
+    except Exception:  # noqa: BLE001
         return 1
 
 
 def _free_disk_gb(path):
     try:
         return shutil.disk_usage(str(path)).free / 1024 / 1024 / 1024
-    except Exception:
+    except Exception:  # noqa: BLE001
         return 0.0
+
+
+def gpu_label(name):
+    if not name:
+        return "UNKNOWN"
+    return name.upper()
+
+
+def _fmt_num(v):
+    s = f"{v:.1f}"
+    s = s.removesuffix(".0")
+    return s
 
 
 class HardwareProfile:
@@ -88,6 +108,7 @@ class HardwareProfile:
             self.asset_workers = 4
             self.prefetch_icons = False
             self.icon_prefetch_ahead = 0
+            self.animations = False
         elif t == "low":
             self.enable_icon_cache = True
             self.enable_body_cache = True
@@ -101,6 +122,7 @@ class HardwareProfile:
             self.asset_workers = 8
             self.prefetch_icons = True
             self.icon_prefetch_ahead = 1
+            self.animations = True
         else:
             self.enable_icon_cache = True
             self.enable_body_cache = True
@@ -114,10 +136,28 @@ class HardwareProfile:
             self.asset_workers = 16
             self.prefetch_icons = True
             self.icon_prefetch_ahead = 2
+            self.animations = True
+
+    def tier_label(self):
+        from core import translate
+
+        return translate.t(f"tier.{self.tier}")
 
     def summary(self):
-        return (f"tier={self.tier} ram={self.ram_gb:.1f}GB "
-                f"cpus={self.cpus} disk={self.free_disk_gb:.1f}GB")
+        return (
+            f"tier={self.tier} ram={self.ram_gb:.1f}GB "
+            f"cpus={self.cpus} disk={self.free_disk_gb:.1f}GB"
+        )
+
+    def summary_lines(self):
+        from core import translate
+
+        return [
+            (translate.t("about.performance_tier"), self.tier_label()),
+            (translate.t("about.ram"), f"{_fmt_num(self.ram_gb)} GB"),
+            (translate.t("about.cpu_cores"), str(self.cpus)),
+            (translate.t("about.disk"), f"{_fmt_num(self.free_disk_gb)} GB"),
+        ]
 
 
 _instance = None

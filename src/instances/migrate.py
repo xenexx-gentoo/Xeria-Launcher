@@ -1,12 +1,13 @@
-from pathlib import Path
+import contextlib
 import shutil
+from pathlib import Path
 
-from core.paths import PROFILES_DIR
 from core import translate
+from core.paths import PROFILES_DIR
 from core.worker import _shutdown
 from instances.profile import Profile
-from integration import modrinth, net as http
-
+from integration import modrinth
+from integration import net as http
 
 SOURCE_FOLDERS = ("mods", "resourcepacks", "shaderpacks")
 KIND_BY_FOLDER = {
@@ -20,7 +21,7 @@ def verify_one(path, mc_version, kind, loader):
     concrete = (loader or "vanilla").lower() if kind == "mod" else None
     try:
         sha1 = modrinth._sha1_file(path)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     info = modrinth.project_from_hash(sha1)
     project_id = info.get("project_id") if info else None
@@ -37,11 +38,9 @@ def verify_one(path, mc_version, kind, loader):
         for v in modrinth.list_versions(project_id):
             if v.get("id") != version_id:
                 continue
-            return modrinth._version_compatible(
-                v, mc_version, kind, concrete)
+            return modrinth._version_compatible(v, mc_version, kind, concrete)
 
-    latest = modrinth.latest_file(
-        project_id, mc_version, kind, concrete)
+    latest = modrinth.latest_file(project_id, mc_version, kind, concrete)
     return latest is not None
 
 
@@ -62,8 +61,11 @@ def scan_profile(profile):
         d = path / sub
         if not d.exists() or not d.is_dir():
             continue
-        files = [f for f in d.iterdir()
-                 if f.is_file() and f.suffix.lower() in (".jar", ".zip")]
+        files = [
+            f
+            for f in d.iterdir()
+            if f.is_file() and f.suffix.lower() in (".jar", ".zip")
+        ]
         info[sub] = sorted(files, key=lambda f: f.name.lower())
     info["has_config"] = (path / "config").is_dir()
     info["has_saves"] = (path / "saves").is_dir()
@@ -75,31 +77,25 @@ def scan_profile(profile):
 def _resolve_source_file(path):
     try:
         sha1 = modrinth._sha1_file(path)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None, "", path.stem
 
     info = modrinth.project_from_hash(sha1)
     if info and info.get("project_id"):
         title = info.get("name") or path.stem
-        try:
+        with contextlib.suppress(Exception):
             proj = modrinth.fetch_project(info["project_id"])
             if proj and proj.get("title"):
                 title = proj["title"]
-        except Exception:
-            pass
-        return (info["project_id"],
-                info.get("version_number", ""),
-                title)
+        return (info["project_id"], info.get("version_number", ""), title)
 
     pid = modrinth.project_id_from_filename(path.name)
     if pid:
         title = path.stem
-        try:
+        with contextlib.suppress(Exception):
             proj = modrinth.fetch_project(pid)
             if proj and proj.get("title"):
                 title = proj["title"]
-        except Exception:
-            pass
         return pid, "", title
 
     return None, "", path.stem
@@ -131,8 +127,7 @@ def check_files(files, mc_version, kind, loader, log=None, progress=None):
                 progress(i, total)
             continue
 
-        latest = modrinth.latest_file(
-            project_id, mc_version, kind, target_loader)
+        latest = modrinth.latest_file(project_id, mc_version, kind, target_loader)
         if latest:
             url, fname, new_ver = latest
             if old_ver and new_ver and old_ver != new_ver:
@@ -172,15 +167,11 @@ def create_profile(source_profile, name, mc_version):
     p.loader = source_profile.loader
     p.ram = source_profile.ram
     p.override_gc = getattr(source_profile, "override_gc", "")
-    p.override_jvm_flags = getattr(
-        source_profile, "override_jvm_flags", "")
-    p.override_env_vars = getattr(
-        source_profile, "override_env_vars", "")
-    p.override_java_path = getattr(
-        source_profile, "override_java_path", "")
-    p.override_wrapper = getattr(
-        source_profile, "override_wrapper", "")
-    p.dir
+    p.override_jvm_flags = getattr(source_profile, "override_jvm_flags", "")
+    p.override_env_vars = getattr(source_profile, "override_env_vars", "")
+    p.override_java_path = getattr(source_profile, "override_java_path", "")
+    p.override_wrapper = getattr(source_profile, "override_wrapper", "")
+    _ = p.dir
     p.save()
     return p
 
@@ -193,8 +184,7 @@ def _walk_copy(src_dir, dst_dir, items):
             items.append((f, dst_dir / rel))
 
 
-def _cleanup_target(target_profile, mc_version, loader,
-                    log=None, progress=None):
+def _cleanup_target(target_profile, mc_version, loader, log=None, progress=None):
     tasks = []
     for folder, kind in KIND_BY_FOLDER.items():
         d = target_profile.dir / folder
@@ -219,19 +209,24 @@ def _cleanup_target(target_profile, mc_version, loader,
                 path.unlink()
                 removed += 1
                 if log:
-                    log("warn", translate.t(
-                        "console.removed_incompat",
-                        name=path.name, version=mc_version))
-            except Exception as e:
+                    log(
+                        "warn",
+                        translate.t(
+                            "console.removed_incompat",
+                            name=path.name,
+                            version=mc_version,
+                        ),
+                    )
+            except Exception as e:  # noqa: BLE001
                 if log:
-                    log("error", translate.t(
-                        "console.remove_failed",
-                        name=path.name, err=e))
+                    log(
+                        "error",
+                        translate.t("console.remove_failed", name=path.name, err=e),
+                    )
     return removed
 
 
-def apply_plan(target_profile, plan, mc_version, loader,
-               log=None, progress=None):
+def apply_plan(target_profile, plan, mc_version, loader, log=None, progress=None):
     target = target_profile.dir
     target.mkdir(parents=True, exist_ok=True)
 
@@ -239,8 +234,7 @@ def apply_plan(target_profile, plan, mc_version, loader,
     for kind in SOURCE_FOLDERS:
         for item in plan[kind]:
             src_path, dst_rel, url, filename, title = item
-            downloads.append((kind, src_path, dst_rel, url,
-                              filename, title))
+            downloads.append((kind, src_path, dst_rel, url, filename, title))
 
     plain_items = []
     if plan.get("copy_config"):
@@ -264,8 +258,7 @@ def apply_plan(target_profile, plan, mc_version, loader,
     installed = 0
     failed = 0
 
-    for i, (kind, src_path, dst_rel, url, filename, title) in enumerate(
-            downloads, 1):
+    for i, (kind, src_path, dst_rel, url, filename, title) in enumerate(downloads, 1):
         if _shutdown.is_set():
             if log:
                 log("warn", "Shutdown requested, stopping migration")
@@ -285,36 +278,31 @@ def apply_plan(target_profile, plan, mc_version, loader,
             with http.stream("GET", url) as r:
                 r.raise_for_status()
                 with open(tmp, "wb") as f:
-                    for chunk in r.iter_bytes(65536):
-                        f.write(chunk)
+                    f.writelines(r.iter_bytes(65536))
             tmp.replace(dst)
             installed += 1
             if log:
                 log("ok", f"Downloaded {filename}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             failed += 1
             if log:
                 log("error", f"Failed to download {filename}: {e}")
-            try:
+            with contextlib.suppress(Exception):
                 if tmp.exists():
                     tmp.unlink()
-            except Exception:
-                pass
         if progress:
             progress(i, total)
 
-    for j, (src, dst) in enumerate(
-            plain_items, len(downloads) + 1):
+    for j, (src, dst) in enumerate(plain_items, len(downloads) + 1):
         try:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(src), str(dst))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if log:
                 log("warn", f"Failed to copy {src.name}: {e}")
         if progress:
             progress(j, total)
 
-    _cleanup_target(target_profile, mc_version, loader,
-                    log=log, progress=progress)
+    _cleanup_target(target_profile, mc_version, loader, log=log, progress=progress)
 
     return installed, len(plan.get("skipped", [])), failed

@@ -1,15 +1,13 @@
-import json
 import hashlib
-import time
-import threading
+import json
 import re as _re
-from pathlib import Path
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import requests
+from pathlib import Path
 
 from core.paths import MODRINTH_API
-
+from integration import net as http
 
 UA = "Xeria-Launcher/2.504"
 HEADERS = {"User-Agent": UA, "Accept": "application/json"}
@@ -25,7 +23,7 @@ def _s():
     if _session is None:
         with _session_lock:
             if _session is None:
-                _session = requests.Session()
+                _session = http.client()
                 _session.headers.update(HEADERS)
     return _session
 
@@ -33,13 +31,13 @@ def _s():
 def _get(url, **kwargs):
     try:
         r = _s().get(url, timeout=20, **kwargs)
-    except requests.RequestException:
+    except Exception:  # noqa: BLE001
         return None
     if r.status_code in (429, 500, 502, 503, 504):
         time.sleep(1.5)
         try:
             r = _s().get(url, timeout=20, **kwargs)
-        except requests.RequestException:
+        except Exception:  # noqa: BLE001
             return None
     return r
 
@@ -50,14 +48,23 @@ def search(query, kind, mc_version=None, loader=None, limit=30):
         facets.append([f"versions:{mc_version}"])
     if kind == "mod" and loader and loader != "vanilla":
         facets.append([f"categories:{loader}"])
-    r = _get(f"{MODRINTH_API}/search", params={
-        "query": query, "limit": limit, "facets": json.dumps(facets)})
+    r = _get(
+        f"{MODRINTH_API}/search",
+        params={"query": query, "limit": limit, "facets": json.dumps(facets)},
+    )
     if r is None or r.status_code != 200:
         return []
-    return [{"id": h["project_id"], "title": h["title"], "author": h["author"],
-             "desc": h.get("description", ""), "dl": h.get("downloads", 0),
-             "categories": h.get("categories", [])}
-            for h in r.json().get("hits", [])]
+    return [
+        {
+            "id": h["project_id"],
+            "title": h["title"],
+            "author": h["author"],
+            "desc": h.get("description", ""),
+            "dl": h.get("downloads", 0),
+            "categories": h.get("categories", []),
+        }
+        for h in r.json().get("hits", [])
+    ]
 
 
 def list_versions(project_id):
@@ -66,17 +73,14 @@ def list_versions(project_id):
         return []
     try:
         data = r.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
     return data if isinstance(data, list) else []
 
 
 def _loader_matches(want, x):
-    """Strict: True only if version x supports loader `want`.
-    No Forge <-> NeoForge swap. Vanilla matches only files with no
-    loaders tags or a `vanilla` tag."""
     want = (want or "vanilla").lower()
-    xl = [str(l).lower() for l in (x.get("loaders") or [])]
+    xl = [str(loader).lower() for loader in (x.get("loaders") or [])]
     if want == "vanilla":
         return not xl or "vanilla" in xl
     return want in xl
@@ -85,10 +89,7 @@ def _loader_matches(want, x):
 def _version_compatible(x, mc_version, kind, loader):
     if mc_version and mc_version not in x.get("game_versions", []):
         return False
-    if kind == "mod":
-        if not _loader_matches(loader, x):
-            return False
-    return True
+    return not (kind == "mod" and not _loader_matches(loader, x))
 
 
 def _primary_file(x):
@@ -110,8 +111,9 @@ def pick_file(project_id, mc_version, kind, loader=None, version_id=None):
                     return None
                 return prim["url"], prim["filename"]
         return None
-    candidates = [x for x in versions
-                  if _version_compatible(x, mc_version, kind, loader)]
+    candidates = [
+        x for x in versions if _version_compatible(x, mc_version, kind, loader)
+    ]
     if not candidates:
         return None
     candidates.sort(key=lambda v: v.get("published", ""), reverse=True)
@@ -123,30 +125,39 @@ def pick_file(project_id, mc_version, kind, loader=None, version_id=None):
 
 def latest_file(project_id, mc_version, kind, loader=None):
     versions = list_versions(project_id)
-    candidates = [x for x in versions
-                  if _version_compatible(x, mc_version, kind, loader)]
+    candidates = [
+        x for x in versions if _version_compatible(x, mc_version, kind, loader)
+    ]
     if not candidates:
         return None
     candidates.sort(key=lambda v: v.get("published", ""), reverse=True)
     prim = _primary_file(candidates[0])
     if prim is None:
         return None
-    return (prim["url"], prim["filename"],
-            candidates[0].get("version_number", ""))
+    return (prim["url"], prim["filename"], candidates[0].get("version_number", ""))
 
 
 def search_modpacks(query, limit=20):
     return search(query, "modpack", None, None, limit=limit)
 
 
-def pick_modpack_file(project_id):
+def pick_modpack_file(project_id, version_id=None):
     r = _get(f"{MODRINTH_API}/project/{project_id}/version")
     if r is None or r.status_code != 200:
         return None
-    for v in r.json():
+    versions = r.json() or []
+    if version_id:
+        for v in versions:
+            if v.get("id") != version_id:
+                continue
+            for f in v.get("files", []):
+                if f["filename"].endswith(".mrpack"):
+                    return (f["url"], f["filename"], v.get("version_number", ""))
+            return None
+    for v in versions:
         for f in v.get("files", []):
             if f["filename"].endswith(".mrpack"):
-                return f["url"], f["filename"], v.get("version_number", "")
+                return (f["url"], f["filename"], v.get("version_number", ""))
     return None
 
 
@@ -156,7 +167,7 @@ def project_from_hash(sha1):
         return None
     try:
         data = r.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
     if not isinstance(data, dict) or not data.get("project_id"):
         return None
@@ -171,8 +182,10 @@ def project_from_hash(sha1):
 
 
 _STRIP_PATTERNS = [
-    r"-(?:fabric|forge|neoforge|quilt|mc|server|client)?[-_]?"
-    r"(?:\d+\.\d+(?:\.\d+)?(?:\.\d+)?)(?:[-+].*)?$",
+    (
+        r"-(?:fabric|forge|neoforge|quilt|mc|server|client)?[-_]?"
+        r"(?:\d+\.\d+(?:\.\d+)?(?:\.\d+)?)(?:[-+].*)?$"
+    ),
     r"-(?:fabric|forge|neoforge|quilt|mc|server|client)$",
     r"[-_]v?\d+(?:\.\d+){1,3}.*$",
 ]
@@ -195,15 +208,13 @@ def _slug_candidates(filename):
 
     _add(stem)
     for pat in _STRIP_PATTERNS:
-        _add(_re.sub(pat, "", stem, flags=_re.I))
+        _add(_re.sub(pat, "", stem, flags=_re.IGNORECASE))
     if "-" in stem:
         _add(stem.split("-", 1)[0])
     return out
 
 
 def project_id_from_filename(filename, kind_hint=None):
-    """Best-effort lookup of a Modrinth project by jar filename.
-    Returns a project id or None. Cached by filename."""
     if not filename:
         return None
     cache_key = filename.lower()
@@ -212,13 +223,12 @@ def project_id_from_filename(filename, kind_hint=None):
         return cached or None
 
     for slug in _slug_candidates(filename):
-        r = _get(f"{MODRINTH_API}/search",
-                 params={"query": slug, "limit": 5})
+        r = _get(f"{MODRINTH_API}/search", params={"query": slug, "limit": 5})
         if r is None or r.status_code != 200:
             continue
         try:
             hits = r.json().get("hits", [])
-        except Exception:
+        except Exception:  # noqa: BLE001, S112
             continue
         target = slug.replace("-", " ").replace("_", " ").lower()
         for h in hits:
@@ -245,7 +255,7 @@ def fetch_project(project_id):
         return None
     try:
         d = r.json()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
     author = ""
     mr = _get(f"{MODRINTH_API}/project/{project_id}/members")
@@ -258,9 +268,8 @@ def fetch_project(project_id):
                         author = (m.get("user") or {}).get("username", "")
                         break
                 if not author:
-                    author = (members[0].get("user") or {}).get(
-                        "username", "")
-        except Exception:
+                    author = (members[0].get("user") or {}).get("username", "")
+        except Exception:  # noqa: BLE001, S110
             pass
     return {
         "title": d.get("title", ""),
@@ -296,15 +305,14 @@ def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
     }
     try:
         sha1 = _sha1_file(path)
-    except Exception:
+    except Exception:  # noqa: BLE001
         out["status"] = "error"
         return out
     info = project_from_hash(sha1)
     if not info or not info.get("project_id"):
         pid = project_id_from_filename(p.name)
         if pid:
-            info = {"project_id": pid, "version_number": "",
-                    "name": p.stem}
+            info = {"project_id": pid, "version_number": "", "name": p.stem}
         else:
             out["status"] = "not-on-modrinth"
             return out
@@ -320,8 +328,7 @@ def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
             out["author"] = proj["author"]
     if want_latest:
         effective_loader = loader if kind == "mod" else None
-        latest = latest_file(info["project_id"], mc_version, kind,
-                             effective_loader)
+        latest = latest_file(info["project_id"], mc_version, kind, effective_loader)
         if latest:
             url, fname, ver = latest
             out["latest_version"] = ver
@@ -338,8 +345,9 @@ def resolve_one(path, mc_version, kind, loader=None, want_latest=True):
     return out
 
 
-def resolve_mods_parallel(paths, mc_version, kind, loader=None,
-                          workers=3, progress=None):
+def resolve_mods_parallel(
+    paths, mc_version, kind, loader=None, workers=3, progress=None
+):
     results = {}
     total = len(paths)
     if not total:
@@ -354,13 +362,13 @@ def resolve_mods_parallel(paths, mc_version, kind, loader=None,
         for fut in as_completed(futures):
             try:
                 p, info = fut.result()
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             results[Path(p).name] = info
             done += 1
             if progress:
                 try:
                     progress(done, total)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
     return results

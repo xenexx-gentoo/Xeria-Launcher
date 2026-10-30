@@ -4,12 +4,12 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from PyQt6.QtCore import Qt, QSize, QUrl, QTimer
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QIcon, QColor, QPalette
 from PyQt6.QtNetwork import QNetworkAccessManager
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QFrame, QMessageBox, QMenu,
-    QSizePolicy,
+    QSizePolicy, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
 )
 
 from core import theme
@@ -17,9 +17,13 @@ from core import translate
 from core.paths import IS_WIN, IS_MAC
 from core.worker import Worker, _leaked_threads
 from integration import modrinth, net as http
-from browse.common import (
+from ui.helpers import (
+    s_popup_menu, s_glass_list, s_glass_btn_neutral,
+    glass_accent, glass_soft, glass_border,
+)
+from browse.common import IconLoader
+from browse.utils import (
     ICON_SIZE_ROW, make_placeholder, square_icon, square_icon_pixmap,
-    IconLoader,
 )
 
 
@@ -48,6 +52,13 @@ def _kind_label(kind):
     return translate.t(f"kind.{kind}")
 
 
+class _NoDimDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        option.state |= QStyle.StateFlag.State_Active
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, option, index)
+
+
 class ControlTab(QWidget):
     ROW_HEIGHT = 64
 
@@ -72,7 +83,7 @@ class ControlTab(QWidget):
         self.icon_loader = IconLoader(self, nam=self._nam)
         try:
             self.icon_loader.icon_ready.connect(self._on_icon_ready)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
         self._build_ui()
@@ -90,7 +101,7 @@ class ControlTab(QWidget):
                 return
             self.rescan()
             self._ensure_resolved()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _ensure_resolved(self):
@@ -130,7 +141,7 @@ class ControlTab(QWidget):
                     m.update(result)
                     profile.mods_meta = m
                     profile.save()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 return result
 
@@ -140,7 +151,7 @@ class ControlTab(QWidget):
             self._track(w, on_done=self._on_resolved)
             self._resolve_worker = w
             w.start()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _on_resolved(self, result):
@@ -149,7 +160,7 @@ class ControlTab(QWidget):
                 return
             self._resolve_worker = None
             if isinstance(result, dict):
-                for path, entry in self._mods.items():
+                for entry in self._mods.values():
                     r = result.get(entry["filename"])
                     if not r:
                         continue
@@ -173,12 +184,12 @@ class ControlTab(QWidget):
                     if pid and entry.get("icon_pixmap") is None:
                         try:
                             self.icon_loader.request(pid)
-                        except RuntimeError:
+                        except RuntimeError:  # noqa: BLE001, S110
                             pass
             self._rerender()
             self._update_summary()
             QTimer.singleShot(0, self._ensure_resolved)
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _build_ui(self):
@@ -190,25 +201,34 @@ class ControlTab(QWidget):
         top.setSpacing(6)
 
         self.summary = QLabel("…")
+        self.summary.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.summary.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.summary.setStyleSheet(
-            f"color:{theme.GRAY};font-size:9pt;background:transparent")
+            f"color:{theme.GRAY};font-size:9pt;background:transparent;"
+            f"outline:none;")
         self.summary.setSizePolicy(QSizePolicy.Policy.Expanding,
                                    QSizePolicy.Policy.Preferred)
         top.addWidget(self.summary, 1)
 
         self.sync_all_btn = QPushButton(translate.t("btn.sync_all"))
         self.sync_all_btn.setMinimumWidth(160)
+        self.sync_all_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.sync_all_btn.setSizePolicy(QSizePolicy.Policy.Preferred,
                                         QSizePolicy.Policy.Fixed)
         self.sync_all_btn.setAutoDefault(False)
         self.sync_all_btn.setDefault(False)
+
         self.sync_all_btn.setStyleSheet(
-            f"QPushButton{{background:{theme.ACCENT};"
-            f"color:{theme.on_accent()};border:none;"
-            f"padding:8px 20px;font-weight:bold;min-width:160px}}"
-            f"QPushButton:hover{{background:{theme.ACCENT2}}}"
-            f"QPushButton:disabled{{background:{theme.BG3};"
-            f"color:{theme.GRAY}}}")
+            f"QPushButton{{background:{glass_accent(180)};"
+            f"color:{theme.on_accent()};"
+            f"padding:8px 20px;font-weight:bold;min-width:160px;"
+            f"border:1px solid {glass_accent(220)};border-radius:8px;"
+            f"outline:none;}}"
+            f"QPushButton:focus{{outline:none;}}"
+            f"QPushButton:hover{{background:{glass_accent(230)};}}"
+            f"QPushButton:disabled{{background:{glass_soft(80)};"
+            f"color:{theme.GRAY};border:1px solid {glass_border(30)};}}")
         self.sync_all_btn.clicked.connect(self.synchronize_all)
         top.addWidget(self.sync_all_btn)
 
@@ -216,6 +236,10 @@ class ControlTab(QWidget):
 
         self.list = QListWidget()
         self.list.setFrameShape(QFrame.Shape.NoFrame)
+        self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.list.viewport().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.list.viewport().setAutoFillBackground(False)
+        self.list.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.list.setSelectionMode(
             QListWidget.SelectionMode.ExtendedSelection)
         self.list.setVerticalScrollMode(
@@ -224,12 +248,29 @@ class ControlTab(QWidget):
         self.list.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._on_ctx)
+
         self.list.setStyleSheet(
-            f"QListWidget{{background:{theme.BG2};color:{theme.FG};"
-            f"border:none;padding:0;outline:0}}"
-            f"QListWidget::item{{padding:0;border:none}}"
-            f"QListWidget::item:selected{{background:{theme.BG3};"
-            f"border:none}}")
+            f"QListWidget{{background:transparent;color:{theme.FG};"
+            f"padding:0;border:none;border-radius:8px;outline:0}}"
+            f"QListWidget:focus{{outline:none;}}"
+            f"QListWidget::item{{padding:0;outline:none;"
+            f"border-radius:6px;}}"
+            f"QListWidget::item:focus{{outline:none;"
+            f"background:transparent;}}"
+            f"QListWidget::item:selected{{background:{glass_accent(90)};"
+            f"outline:none;}}"
+            f"QListWidget::item:hover{{background:{glass_soft(140)};"
+            f"outline:none;}}"
+        )
+
+        pal = self.list.palette()
+        pal.setColor(QPalette.ColorGroup.Inactive,
+                     QPalette.ColorRole.Highlight, QColor(theme.ACCENT))
+        pal.setColor(QPalette.ColorGroup.Inactive,
+                     QPalette.ColorRole.HighlightedText, QColor(theme.FG))
+        self.list.setPalette(pal)
+        self.list.setItemDelegate(_NoDimDelegate(self.list))
+
         self.list.verticalScrollBar().valueChanged.connect(
             self._cull_visible)
         v.addWidget(self.list, 1)
@@ -240,16 +281,47 @@ class ControlTab(QWidget):
                 return
             self.summary.setStyleSheet(
                 f"color:{theme.GRAY};font-size:9pt;"
-                f"background:transparent")
+                f"background:transparent;outline:none;")
             self.sync_all_btn.setStyleSheet(
-                f"QPushButton{{background:{theme.ACCENT};"
-                f"color:{theme.on_accent()};border:none;"
-                f"padding:8px 20px;font-weight:bold;min-width:160px}}"
-                f"QPushButton:hover{{background:{theme.ACCENT2}}}"
-                f"QPushButton:disabled{{background:{theme.BG3};"
-                f"color:{theme.GRAY}}}")
+                f"QPushButton{{background:{glass_accent(180)};"
+                f"color:{theme.on_accent()};"
+                f"padding:8px 20px;font-weight:bold;min-width:160px;"
+                f"border:1px solid {glass_accent(220)};border-radius:8px;"
+                f"outline:none;}}"
+                f"QPushButton:focus{{outline:none;}}"
+                f"QPushButton:hover{{background:{glass_accent(230)};}}"
+                f"QPushButton:disabled{{background:{glass_soft(80)};"
+                f"color:{theme.GRAY};border:1px solid {glass_border(30)};}}")
+
+            self.list.setStyleSheet(
+                f"QListWidget{{background:transparent;color:{theme.FG};"
+                f"padding:0;border:none;border-radius:8px;outline:0}}"
+                f"QListWidget:focus{{outline:none;}}"
+                f"QListWidget::item{{padding:0;outline:none;"
+                f"border-radius:6px;}}"
+                f"QListWidget::item:focus{{outline:none;"
+                f"background:transparent;}}"
+                f"QListWidget::item:selected{{background:{glass_accent(90)};"
+                f"outline:none;}}"
+                f"QListWidget::item:hover{{background:{glass_soft(140)};"
+                f"outline:none;}}"
+            )
+
+            pal = self.list.palette()
+            pal.setColor(QPalette.ColorGroup.Inactive,
+                         QPalette.ColorRole.Highlight,
+                         QColor(theme.ACCENT))
+            pal.setColor(QPalette.ColorGroup.Inactive,
+                         QPalette.ColorRole.HighlightedText,
+                         QColor(theme.FG))
+            self.list.setPalette(pal)
+
+            self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.list.viewport().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.list.setAttribute(
+                Qt.WidgetAttribute.WA_MacShowFocusRect, False)
             self._rerender()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _track(self, w, on_done=None):
@@ -259,7 +331,7 @@ class ControlTab(QWidget):
                 w.done.connect(on_done, Qt.ConnectionType.QueuedConnection)
             w.finished.connect(
                 lambda: self._active_workers.discard(w))
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def shutdown(self):
@@ -269,12 +341,12 @@ class ControlTab(QWidget):
             self._deleted = True
             try:
                 self.icon_loader.icon_ready.disconnect()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             try:
                 self.icon_loader.setParent(None)
                 self.icon_loader.deleteLater()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             self._pending_rerender = False
             for w in list(self._active_workers):
@@ -284,22 +356,22 @@ class ControlTab(QWidget):
                         w.done.disconnect()
                         w.progress.disconnect()
                         w.progress_end.disconnect()
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
                         pass
                     w.quit()
                     if not w.wait(200):
                         _leaked_threads.append(w)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
             self._active_workers.clear()
             self._sync_running = False
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def closeEvent(self, event):
         try:
             self.shutdown()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         super().closeEvent(event)
 
@@ -345,9 +417,9 @@ class ControlTab(QWidget):
                 if pid and entry.get("icon_pixmap") is None:
                     try:
                         self.icon_loader.request(pid)
-                    except RuntimeError:
+                    except RuntimeError:  # noqa: BLE001, S110
                         break
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def synchronize_all(self):
@@ -389,7 +461,7 @@ class ControlTab(QWidget):
                 lambda: None, Qt.ConnectionType.QueuedConnection)
             self._track(w, on_done=self._sync_all_done)
             w.start()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _on_sync_progress(self, label, cur, total, extra, speed):
@@ -397,7 +469,7 @@ class ControlTab(QWidget):
             if self._deleted:
                 return
             self.summary.setText(f"{label} {cur}/{total}")
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _sync_all_task(self, entries, log, progress, progress_end):
@@ -421,7 +493,7 @@ class ControlTab(QWidget):
                     log("warn", translate.t(
                         "console.removed_incompat",
                         name=entry["filename"], version=mc_version))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log("error", translate.t(
                         "console.remove_failed",
                         name=entry["filename"], err=e))
@@ -471,7 +543,7 @@ class ControlTab(QWidget):
                         r.get("latest_filename") or entry["target_name"])
                     entry["status"] = (
                         r.get("status") or entry["status"])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log("error", str(e))
             progress_end()
 
@@ -514,7 +586,7 @@ class ControlTab(QWidget):
                 if not _verify_installed(tmp, mc_version, kind, loader):
                     try:
                         tmp.unlink()
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110
                         pass
                     entry["status"] = "no-update-available"
                     entry["busy"] = False
@@ -525,7 +597,7 @@ class ControlTab(QWidget):
                 if old.exists() and old.resolve() != target.resolve():
                     try:
                         old.unlink()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         log("warn", str(e))
                 tmp.replace(target)
                 entry["status"] = "up-to-date"
@@ -533,14 +605,14 @@ class ControlTab(QWidget):
                 entry["filename"] = target.name
                 entry["busy"] = False
                 return True, entry
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log("error", str(e))
                 entry["status"] = "error"
                 entry["busy"] = False
                 try:
                     if tmp.exists():
                         tmp.unlink()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 return False, entry
 
@@ -571,11 +643,11 @@ class ControlTab(QWidget):
                 if pid and entry.get("icon_pixmap") is None:
                     try:
                         self.icon_loader.request(pid)
-                    except RuntimeError:
+                    except RuntimeError:  # noqa: BLE001, S110
                         break
             self._persist_meta()
             self._update_summary()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _persist_meta(self):
@@ -596,43 +668,7 @@ class ControlTab(QWidget):
                 }
             self.profile.mods_meta = meta
             self.profile.save()
-        except Exception:
-            pass
-
-    def _sync_selected(self):
-        try:
-            if self._deleted or self._sync_running:
-                return
-            items = self.list.selectedItems()
-            if not items:
-                return
-            paths = self._sorted_paths()
-            chosen = []
-            for it in items:
-                idx = self.list.row(it)
-                if 0 <= idx < len(paths):
-                    path = paths[idx]
-                    entry = self._mods.get(path)
-                    if entry and not entry["busy"]:
-                        entry["busy"] = True
-                        chosen.append((path, entry))
-            if not chosen:
-                return
-            self._sync_running = True
-            self._rerender()
-            self._update_summary()
-
-            w = Worker(self._sync_all_task, chosen)
-            w.log.connect(self.log_fn,
-                          Qt.ConnectionType.QueuedConnection)
-            w.progress.connect(
-                lambda *a: self._on_sync_progress(*a),
-                Qt.ConnectionType.QueuedConnection)
-            w.progress_end.connect(
-                lambda: None, Qt.ConnectionType.QueuedConnection)
-            self._track(w, on_done=self._sync_all_done)
-            w.start()
-        except RuntimeError:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     def _delete_selected(self):
@@ -672,7 +708,7 @@ class ControlTab(QWidget):
                     if entry:
                         self.log_fn("warn", translate.t(
                             "console.deleted", title=entry["title"]))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     self.log_fn("error", translate.t(
                         "console.delete_failed", err=e))
                     continue
@@ -680,16 +716,16 @@ class ControlTab(QWidget):
                     if entry:
                         self.profile.mods_meta.pop(
                             entry["filename"], None)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 del self._mods[path]
             try:
                 self.profile.save()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             self._rerender()
             self._update_summary()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _on_ctx(self, pos):
@@ -705,31 +741,12 @@ class ControlTab(QWidget):
             self.list.setCurrentItem(item)
 
             paths = self._sorted_paths()
-            sel_count = len(self.list.selectedItems())
             row = self.list.row(item)
             primary_path = paths[row] if 0 <= row < len(paths) else None
             primary = self._mods.get(primary_path) if primary_path else None
 
             m = QMenu(self)
-            m.setStyleSheet(
-                f"QMenu{{background:{theme.BG2};color:{theme.FG};"
-                f"border:none;padding:4px}}"
-                f"QMenu::item{{padding:6px 20px 6px 12px}}"
-                f"QMenu::item:selected{{background:{theme.BG3};"
-                f"color:{theme.FG}}}"
-                f"QMenu::item:disabled{{color:{theme.GRAY}}}"
-                f"QMenu::separator{{height:1px;"
-                f"background:{theme.BORDER};margin:4px 0}}")
-
-            busy = self._sync_running
-            sync_label = (translate.t("btn.sync_latest")
-                          if sel_count == 1
-                          else f"{translate.t('btn.sync_latest')} "
-                               f"({sel_count})")
-            sync_act = m.addAction(sync_label)
-            sync_act.setEnabled(not busy)
-            sync_act.triggered.connect(
-                lambda _=False: self._sync_selected())
+            m.setStyleSheet(s_popup_menu())
 
             if primary and primary.get("project_id"):
                 pid = primary["project_id"]
@@ -746,6 +763,7 @@ class ControlTab(QWidget):
                     lambda p=primary_path: self._reveal(p))
 
             m.addSeparator()
+            sel_count = len(self.list.selectedItems())
             del_label = (translate.t("btn.delete") if sel_count == 1
                          else f"{translate.t('btn.delete')} "
                               f"({sel_count})")
@@ -754,7 +772,7 @@ class ControlTab(QWidget):
                 lambda _=False: self._delete_selected())
 
             m.exec(self.list.mapToGlobal(pos))
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _reveal(self, path):
@@ -769,11 +787,11 @@ class ControlTab(QWidget):
                 subprocess.Popen(["open", "-R", str(p)])
             else:
                 subprocess.Popen(["xdg-open", str(folder)])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             try:
                 self.log_fn("error", translate.t(
                     "console.reveal_failed", err=e))
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     def _on_icon_ready(self, project_id, icon):
@@ -789,7 +807,7 @@ class ControlTab(QWidget):
                     row = self._rows.get(path)
                     if row is not None and hasattr(row, "_icon"):
                         row._icon.setPixmap(pm)
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _update_summary(self):
@@ -807,7 +825,7 @@ class ControlTab(QWidget):
             lbl.setText(translate.t(
                 "control.summary_count",
                 n=total, label=self.label))
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _sorted_paths(self):
@@ -822,7 +840,7 @@ class ControlTab(QWidget):
                 return
             self._pending_rerender = True
             QTimer.singleShot(0, self._do_rerender)
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _do_rerender(self):
@@ -831,7 +849,7 @@ class ControlTab(QWidget):
                 return
             self._pending_rerender = False
             self._rerender()
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _rerender(self):
@@ -851,7 +869,7 @@ class ControlTab(QWidget):
             finally:
                 self.list.setUpdatesEnabled(True)
             QTimer.singleShot(0, self._cull_visible)
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _cull_visible(self, *_):
@@ -893,23 +911,31 @@ class ControlTab(QWidget):
                     continue
                 entry = self._mods[path]
                 row = self._make_row(path, entry)
+                for _lbl in row.findChildren(QLabel):
+                    _lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                    _lbl.setAttribute(
+                        Qt.WidgetAttribute.WA_MacShowFocusRect, False)
                 it = self.list.item(idx)
                 if it is not None:
                     self.list.setItemWidget(it, row)
                     self._rows[path] = row
-        except RuntimeError:
+        except RuntimeError:  # noqa: BLE001, S110
             pass
 
     def _make_row(self, path, entry):
         row = QWidget()
         row.setStyleSheet(
-            f"QWidget{{background:transparent;border:none;"
-            f"border-bottom:1px solid {theme.BG};}}")
+            f"QWidget{{background:transparent;"
+            f"outline:none;"
+            f"}}")
         h = QHBoxLayout(row)
         h.setContentsMargins(8, 4, 8, 4)
         h.setSpacing(10)
 
         ic = QLabel()
+        ic.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        ic.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         ic.setFixedSize(ICON_SIZE_ROW, ICON_SIZE_ROW)
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cached = entry.get("icon_pixmap")
@@ -921,7 +947,7 @@ class ControlTab(QWidget):
             ic.setPixmap(square_icon_pixmap(ph, ICON_SIZE_ROW))
 
         ic_host = QWidget()
-        ic_host.setStyleSheet("background:transparent;border:none")
+        ic_host.setStyleSheet("background:transparent;")
         ic_host.setFixedWidth(ICON_SIZE_ROW)
         ic_col = QVBoxLayout(ic_host)
         ic_col.setContentsMargins(0, 0, 0, 0)
@@ -935,9 +961,12 @@ class ControlTab(QWidget):
         col = QVBoxLayout()
         col.setSpacing(1)
         title = QLabel(entry["title"] or entry["filename"])
+        title.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        title.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         title.setStyleSheet(
             f"color:{theme.FG};font-weight:bold;font-size:10pt;"
-            f"background:transparent")
+            f"background:transparent;outline:none;")
         col.addWidget(title)
 
         ver = entry["current_ver"] or ""
@@ -948,30 +977,37 @@ class ControlTab(QWidget):
         else:
             sub_text = translate.t("control.row_filename", filename=fn)
         sub = QLabel(sub_text)
+        sub.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        sub.setAttribute(
+            Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         sub.setStyleSheet(
-            f"color:{theme.GRAY};font-size:9pt;background:transparent")
+            f"color:{theme.GRAY};font-size:9pt;background:transparent;"
+            f"outline:none;")
         col.addWidget(sub)
         h.addLayout(col, 1)
 
         badge_text, badge_color = self._badge_for_status(entry["status"])
         if badge_text:
             badge = QLabel(badge_text)
+            badge.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            badge.setAttribute(
+                Qt.WidgetAttribute.WA_MacShowFocusRect, False)
             badge.setStyleSheet(
                 f"color:{badge_color};font-size:8pt;font-weight:bold;"
-                f"background:transparent")
+                f"background:transparent;outline:none;")
             h.addWidget(badge)
 
         return row
 
     def _badge_for_status(self, status):
         if status == "update-available":
-            return translate.t("control.badge_update"), theme.ACCENT
+            return translate.t("control.badge_update"), theme.YELLOW
         if status == "up-to-date":
-            return translate.t("control.badge_uptodate"), theme.FG
+            return translate.t("control.actual"), theme.ACCENT
         if status == "checking":
             return translate.t("control.badge_checking"), theme.GRAY
         if status == "no-update-available":
-            return translate.t("control.badge_no_compat"), theme.GRAY
+            return translate.t("control.not_actual"), theme.GRAY
         if status == "not-on-modrinth":
             return translate.t("control.badge_not_modrinth"), theme.GRAY
         if status == "removed":

@@ -1,7 +1,7 @@
+import contextlib
 import time
 
-import requests
-
+from integration import net as http
 
 CLIENT_ID = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"
 SCOPES = "XboxLive.signin offline_access"
@@ -44,7 +44,7 @@ class Account:
     def refresh(self):
         if not self.refresh_token:
             raise AuthError("no refresh token")
-        r = requests.post(
+        r = http.post(
             f"{AUTHORITY}/token",
             data={
                 "grant_type": "refresh_token",
@@ -52,7 +52,6 @@ class Account:
                 "refresh_token": self.refresh_token,
                 "scope": SCOPES,
             },
-            timeout=30,
         )
         if r.status_code != 200:
             raise AuthError(f"refresh failed: {r.status_code}")
@@ -62,7 +61,7 @@ class Account:
         self._xbox_and_minecraft()
 
     def _xbox_and_minecraft(self):
-        r = requests.post(
+        r = http.post(
             XBL_AUTH,
             json={
                 "Properties": {
@@ -73,21 +72,18 @@ class Account:
                 "RelyingParty": "http://auth.xboxlive.com",
                 "TokenType": "JWT",
             },
-            timeout=30,
         )
         if r.status_code != 200:
             raise AuthError(f"Xbox Live auth failed: {r.status_code}")
         xbl = r.json()
 
-        r = requests.post(
+        r = http.post(
             XSTS_AUTH,
             json={
-                "Properties": {"SandboxId": "RETAIL",
-                               "UserTokens": [xbl["Token"]]},
+                "Properties": {"SandboxId": "RETAIL", "UserTokens": [xbl["Token"]]},
                 "RelyingParty": "rp://api.minecraftservices.com/",
                 "TokenType": "JWT",
             },
-            timeout=30,
         )
         if r.status_code == 401:
             code = r.json().get("XErr")
@@ -103,10 +99,9 @@ class Account:
         xsts = r.json()
         uhs = xsts["DisplayClaims"]["xui"][0]["uhs"]
 
-        r = requests.post(
+        r = http.post(
             MC_AUTH,
             json={"identityToken": f"XBL3.0 x={uhs};{xsts['Token']}"},
-            timeout=30,
         )
         if r.status_code == 403:
             raise AuthError("Minecraft rejected the client ID (403)")
@@ -115,14 +110,12 @@ class Account:
         self.mc_access = mc["access_token"]
         self.mc_expires = time.time() + mc.get("expires_in", 86400)
 
-        r = requests.get(
+        r = http.get(
             MC_PROFILE,
             headers={"Authorization": f"Bearer {self.mc_access}"},
-            timeout=30,
         )
         if r.status_code == 404:
-            raise AuthError(
-                "this Microsoft account does not own Minecraft")
+            raise AuthError("this Microsoft account does not own Minecraft")
         r.raise_for_status()
         prof = r.json()
         self.name = prof["name"]
@@ -134,38 +127,43 @@ class Account:
         if time.time() > self.mc_expires - 60:
             try:
                 self.refresh()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 return False
         return self.signed_in
 
 
 def sign_in_webview(parent=None, log=print):
-    from PyQt6.QtCore import QUrl, QTimer, Qt
+    from PyQt6.QtCore import Qt, QTimer, QUrl
     from PyQt6.QtGui import QGuiApplication
     from PyQt6.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+        QDialog,
+        QFrame,
+        QHBoxLayout,
+        QLabel,
+        QPushButton,
+        QVBoxLayout,
     )
+
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView
-    except Exception:
+    except Exception as exc:
         raise AuthError(
             "PyQt6-WebEngine is not installed. "
-            "Install it with: pip install PyQt6-WebEngine")
+            "Install it with: pip install PyQt6-WebEngine"
+        ) from exc
 
     dc = None
     try:
-        r = requests.post(
+        r = http.post(
             f"{AUTHORITY}/devicecode",
             data={"client_id": CLIENT_ID, "scope": SCOPES},
-            timeout=15,
         )
         if r.status_code == 200:
             dc = r.json()
             log("info", f"device code: {dc.get('user_code')}")
         else:
-            log("warn", f"devicecode request: {r.status_code} "
-                        f"{r.text[:200]}")
-    except Exception as e:
+            log("warn", f"devicecode request: {r.status_code} {r.text[:200]}")
+    except Exception as e:  # noqa: BLE001
         log("warn", f"device-code fetch failed: {e}")
 
     if not dc:
@@ -192,21 +190,20 @@ def sign_in_webview(parent=None, log=print):
 
     top = QHBoxLayout()
     lbl = QLabel("Sign-in code:")
-    lbl.setStyleSheet(
-        "background:transparent;color:#999;font-size:10pt")
+    lbl.setStyleSheet("background:transparent;color:#999;font-size:10pt")
     top.addWidget(lbl)
 
     code_lbl = QLabel(user_code)
-    code_lbl.setStyleSheet(
-        "background:transparent;color:#fff;font-size:10pt")
+    code_lbl.setStyleSheet("background:transparent;color:#fff;font-size:10pt")
     code_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     top.addWidget(code_lbl)
     top.addStretch()
 
     copy_btn = QPushButton("Copy")
     copy_btn.setStyleSheet(
-        "QPushButton{background:#333;color:#fff;border:none;"
-        "padding:6px 14px}QPushButton:hover{background:#444}")
+        "QPushButton{background:#333;color:#fff;"
+        "padding:6px 14px}QPushButton:hover{background:#444}"
+    )
 
     def _copy():
         QGuiApplication.clipboard().setText(user_code)
@@ -226,16 +223,14 @@ def sign_in_webview(parent=None, log=print):
     poll_timer.setInterval(interval * 1000)
 
     def poll_device_code():
-        try:
-            pr = requests.post(
+        with contextlib.suppress(Exception):
+            pr = http.post(
                 f"{AUTHORITY}/token",
                 data={
-                    "grant_type":
-                        "urn:ietf:params:oauth:grant-type:device_code",
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                     "client_id": CLIENT_ID,
                     "device_code": device_code,
                 },
-                timeout=15,
             )
             if pr.status_code == 200:
                 device_result["token"] = pr.json()
@@ -245,8 +240,6 @@ def sign_in_webview(parent=None, log=print):
             if err in ("authorization_pending", "slow_down"):
                 return
             log("warn", f"device-code poll: {err}")
-        except Exception:
-            pass
 
     poll_timer.timeout.connect(poll_device_code)
     poll_timer.start()

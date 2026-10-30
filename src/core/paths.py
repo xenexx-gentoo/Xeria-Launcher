@@ -1,22 +1,24 @@
-import os, platform, subprocess
+import os
+import platform
+import subprocess
 from pathlib import Path
 
-IS_WIN   = platform.system() == "Windows"
-IS_MAC   = platform.system() == "Darwin"
+IS_WIN = platform.system() == "Windows"
+IS_MAC = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
 
 if IS_WIN:
-    MC_ROOT    = Path(os.getenv("APPDATA", str(Path.home()))) / ".minecraft"
+    MC_ROOT = Path(os.getenv("APPDATA", str(Path.home()))) / ".minecraft"
     XERIA_ROOT = Path(os.getenv("APPDATA", str(Path.home()))) / "Xeria"
 elif IS_MAC:
-    MC_ROOT    = Path.home() / "Library" / "Application Support" / "minecraft"
+    MC_ROOT = Path.home() / "Library" / "Application Support" / "minecraft"
     XERIA_ROOT = Path.home() / "Library" / "Application Support" / "Xeria"
 else:
-    MC_ROOT    = Path.home() / ".minecraft"
+    MC_ROOT = Path.home() / ".minecraft"
     XERIA_ROOT = Path.home() / ".xeria"
 
-PROFILES_DIR  = XERIA_ROOT / "profiles"
-JAVA_DIR      = XERIA_ROOT / "java"
+PROFILES_DIR = XERIA_ROOT / "profiles"
+JAVA_DIR = XERIA_ROOT / "java"
 USERNAME_FILE = XERIA_ROOT / "username.txt"
 SETTINGS_FILE = XERIA_ROOT / "settings.json"
 

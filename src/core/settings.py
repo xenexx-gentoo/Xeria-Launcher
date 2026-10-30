@@ -1,6 +1,7 @@
+import contextlib
 import json
 import platform
-from pathlib import Path
+
 from core.paths import XERIA_ROOT
 
 SETTINGS_FILE = XERIA_ROOT / "settings.json"
@@ -29,14 +30,13 @@ class Settings:
     def __init__(self):
         self._data = dict(DEFAULTS)
         if SETTINGS_FILE.exists():
-            try:
+            with contextlib.suppress(Exception):
                 self._data.update(json.loads(SETTINGS_FILE.read_text()))
-            except Exception:
-                pass
 
     def get(self, key, default=None):
         return self._data.get(
-            key, default if default is not None else DEFAULTS.get(key))
+            key, default if default is not None else DEFAULTS.get(key)
+        )
 
     def set(self, key, value):
         self._data[key] = value
@@ -54,6 +54,7 @@ class Settings:
 
     def get_account(self):
         from core import auth
+
         return auth.Account(self.get("account", {}))
 
     def set_account(self, acc):
@@ -66,11 +67,13 @@ class Settings:
             accs = []
             legacy = self.get("account", {})
             if legacy and legacy.get("name"):
-                accs.append({
-                    "type": "online",
-                    "name": legacy.get("name", ""),
-                    "data": legacy,
-                })
+                accs.append(
+                    {
+                        "type": "online",
+                        "name": legacy.get("name", ""),
+                        "data": legacy,
+                    }
+                )
             self.set("accounts", accs)
         return accs
 
@@ -91,6 +94,7 @@ class Settings:
 
     def active_online_account(self):
         from core import auth
+
         a = self.get_active_account()
         if not a or a.get("type") != "online":
             return auth.Account()
@@ -108,19 +112,19 @@ def detect_gpu():
         return "unknown"
     import glob
     import os
+
     if glob.glob("/proc/driver/nvidia/version"):
         return "nvidia"
     if os.path.exists("/usr/bin/nvidia-smi"):
         return "nvidia"
     for v in glob.glob("/sys/class/drm/card*/device/vendor"):
-        try:
-            vid = open(v).read().strip()
+        with contextlib.suppress(Exception):
+            with open(v) as f:
+                vid = f.read().strip()
             if vid == "0x1002":
                 return "amd"
             if vid == "0x10de":
                 return "nvidia"
             if vid == "0x8086":
                 return "intel"
-        except Exception:
-            pass
     return "unknown"

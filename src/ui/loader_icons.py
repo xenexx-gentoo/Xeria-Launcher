@@ -1,15 +1,15 @@
+import contextlib
 import hashlib
-from pathlib import Path
 
-from PyQt6.QtCore import QUrl, QSize, Qt
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtNetwork import (
-    QNetworkAccessManager, QNetworkRequest, QNetworkReply,
+    QNetworkAccessManager,
+    QNetworkReply,
+    QNetworkRequest,
 )
 
-from core import paths
-from core import theme
-
+from core import paths, theme
 
 CACHE_DIR = paths.XERIA_ROOT / "cache" / "loader_icons"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -17,14 +17,14 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICON_SIZE = 20
 
 LOADER_URLS = {
-    "vanilla":  "https://upload.wikimedia.org/wikipedia/commons/f/fb/"
-                "Minecraft-creeper-face.jpg",
-    "fabric":   "https://fabricmc.net/assets/logo.png",
-    "forge":    "https://raw.githubusercontent.com/FabricCompatibilityLayers/"
-                "art/main/forge.png",
+    "vanilla": "https://upload.wikimedia.org/wikipedia/commons/f/fb/"
+    "Minecraft-creeper-face.jpg",
+    "fabric": "https://fabricmc.net/assets/logo.png",
+    "forge": "https://raw.githubusercontent.com/FabricCompatibilityLayers/"
+    "art/main/forge.png",
     "neoforge": "https://raw.githubusercontent.com/neoforged/.github/"
-                "main/art/neoforged_icon_16x16.png",
-    "quilt":    "https://quiltmc.org/assets/img/logo.svg",
+    "main/art/neoforged_icon_16x16.png",
+    "quilt": "https://quiltmc.org/assets/img/logo.svg",
 }
 
 LOADER_LOCAL = {
@@ -41,9 +41,12 @@ def _cache_path(name):
 
 
 def _scale(pm):
-    return pm.scaled(ICON_SIZE, ICON_SIZE,
-                     Qt.AspectRatioMode.KeepAspectRatio,
-                     Qt.TransformationMode.SmoothTransformation)
+    return pm.scaled(
+        ICON_SIZE,
+        ICON_SIZE,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 def _placeholder():
@@ -59,7 +62,7 @@ def _placeholder():
 def _render_svg(data):
     try:
         from PyQt6.QtSvg import QSvgRenderer
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
     try:
         renderer = QSvgRenderer(bytes(data))
@@ -71,7 +74,7 @@ def _render_svg(data):
         renderer.render(p)
         p.end()
         return pm
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -132,9 +135,9 @@ def fetch_loader_icon(name, callback):
     req = QNetworkRequest(QUrl(url))
     req.setAttribute(
         QNetworkRequest.Attribute.RedirectPolicyAttribute,
-        QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
-    req.setRawHeader(b"User-Agent",
-                     b"Mozilla/5.0 (X11; Linux x86_64) Xeria/2.504")
+        QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+    )
+    req.setRawHeader(b"User-Agent", b"Mozilla/5.0 (X11; Linux x86_64) Xeria/2.504")
     req.setRawHeader(b"Accept", b"image/*,*/*;q=0.8")
     reply = _nam.get(req)
     cp = _cache_path(name)
@@ -158,10 +161,8 @@ def fetch_loader_icon(name, callback):
             return
 
         scaled = _scale(pm)
-        try:
+        with contextlib.suppress(Exception):
             scaled.save(str(path), "PNG")
-        except Exception:
-            pass
         ic = QIcon(scaled)
         _mem_cache[nm] = ic
         callback(ic)
